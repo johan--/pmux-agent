@@ -99,14 +99,14 @@ func TestLoadIdentity_Errors(t *testing.T) {
 		{
 			name:    "missing private key",
 			setup:   func(dir string) {},
-			wantErr: "read private key",
+			wantErr: "enforce private key permissions",
 		},
 		{
 			name: "missing public key",
 			setup: func(dir string) {
 				os.WriteFile(filepath.Join(dir, privateKeyFile), make([]byte, ed25519.PrivateKeySize), keyFilePerms)
 			},
-			wantErr: "read public key",
+			wantErr: "enforce public key permissions",
 		},
 		{
 			name: "invalid private key size",
@@ -235,6 +235,95 @@ func TestPublicKeyBase64(t *testing.T) {
 	if !pubKey.Equal(id.PublicKey) {
 		t.Error("decoded public key does not match original")
 	}
+}
+
+func TestLoadIdentity_FixesInsecurePermissions(t *testing.T) {
+	keysDir := t.TempDir()
+
+	// Generate identity — files should be 0600
+	_, err := GenerateIdentity(keysDir)
+	if err != nil {
+		t.Fatalf("GenerateIdentity() error: %v", err)
+	}
+
+	privPath := filepath.Join(keysDir, privateKeyFile)
+	pubPath := filepath.Join(keysDir, publicKeyFile)
+
+	t.Run("initial permissions are 0600", func(t *testing.T) {
+		privInfo, _ := os.Stat(privPath)
+		pubInfo, _ := os.Stat(pubPath)
+		if privInfo.Mode().Perm() != 0600 {
+			t.Errorf("private key permissions = %o, want 0600", privInfo.Mode().Perm())
+		}
+		if pubInfo.Mode().Perm() != 0600 {
+			t.Errorf("public key permissions = %o, want 0600", pubInfo.Mode().Perm())
+		}
+	})
+
+	t.Run("fixes insecure private key permissions on load", func(t *testing.T) {
+		// Make private key world-readable
+		if err := os.Chmod(privPath, 0644); err != nil {
+			t.Fatalf("chmod error: %v", err)
+		}
+
+		// Verify it was changed
+		info, _ := os.Stat(privPath)
+		if info.Mode().Perm() != 0644 {
+			t.Fatalf("chmod did not take effect")
+		}
+
+		// LoadIdentity should fix it
+		_, err := LoadIdentity(keysDir)
+		if err != nil {
+			t.Fatalf("LoadIdentity() error: %v", err)
+		}
+
+		// Verify permissions were fixed back to 0600
+		info, _ = os.Stat(privPath)
+		if info.Mode().Perm() != 0600 {
+			t.Errorf("private key permissions after load = %o, want 0600", info.Mode().Perm())
+		}
+	})
+
+	t.Run("fixes insecure public key permissions on load", func(t *testing.T) {
+		// Make public key world-readable
+		if err := os.Chmod(pubPath, 0644); err != nil {
+			t.Fatalf("chmod error: %v", err)
+		}
+
+		// LoadIdentity should fix it
+		_, err := LoadIdentity(keysDir)
+		if err != nil {
+			t.Fatalf("LoadIdentity() error: %v", err)
+		}
+
+		// Verify permissions were fixed back to 0600
+		info, _ := os.Stat(pubPath)
+		if info.Mode().Perm() != 0600 {
+			t.Errorf("public key permissions after load = %o, want 0600", info.Mode().Perm())
+		}
+	})
+
+	t.Run("fixes both insecure permissions simultaneously", func(t *testing.T) {
+		// Make both keys world-readable
+		os.Chmod(privPath, 0755)
+		os.Chmod(pubPath, 0666)
+
+		// LoadIdentity should fix both
+		_, err := LoadIdentity(keysDir)
+		if err != nil {
+			t.Fatalf("LoadIdentity() error: %v", err)
+		}
+
+		privInfo, _ := os.Stat(privPath)
+		pubInfo, _ := os.Stat(pubPath)
+		if privInfo.Mode().Perm() != 0600 {
+			t.Errorf("private key permissions = %o, want 0600", privInfo.Mode().Perm())
+		}
+		if pubInfo.Mode().Perm() != 0600 {
+			t.Errorf("public key permissions = %o, want 0600", pubInfo.Mode().Perm())
+		}
+	})
 }
 
 func TestGenerateIdentity_Uniqueness(t *testing.T) {

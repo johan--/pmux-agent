@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -47,9 +48,19 @@ func GenerateIdentity(keysDir string) (*Identity, error) {
 }
 
 // LoadIdentity loads an existing Ed25519 keypair from keysDir.
+// If key file permissions are more permissive than 0600, they are
+// automatically tightened and a warning is logged.
 func LoadIdentity(keysDir string) (*Identity, error) {
 	privPath := filepath.Join(keysDir, privateKeyFile)
 	pubPath := filepath.Join(keysDir, publicKeyFile)
+
+	// Check and fix permissions before reading
+	if err := enforceKeyFilePerms(privPath); err != nil {
+		return nil, fmt.Errorf("enforce private key permissions: %w", err)
+	}
+	if err := enforceKeyFilePerms(pubPath); err != nil {
+		return nil, fmt.Errorf("enforce public key permissions: %w", err)
+	}
 
 	privBytes, err := os.ReadFile(privPath)
 	if err != nil {
@@ -76,6 +87,29 @@ func LoadIdentity(keysDir string) (*Identity, error) {
 		PublicKey:  pub,
 		DeviceID:   deriveDeviceID(pub),
 	}, nil
+}
+
+// enforceKeyFilePerms checks that a key file has 0600 permissions.
+// If the file is more permissive, it fixes the permissions and logs a warning.
+func enforceKeyFilePerms(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", filepath.Base(path), err)
+	}
+
+	perm := info.Mode().Perm()
+	if perm != keyFilePerms {
+		slog.Warn("insecure key file permissions detected, fixing",
+			"file", filepath.Base(path),
+			"was", fmt.Sprintf("%04o", perm),
+			"fixed", fmt.Sprintf("%04o", keyFilePerms),
+		)
+		if err := os.Chmod(path, keyFilePerms); err != nil {
+			return fmt.Errorf("chmod %s: %w", filepath.Base(path), err)
+		}
+	}
+
+	return nil
 }
 
 // HasIdentity checks whether an Ed25519 keypair exists in keysDir.
