@@ -14,21 +14,25 @@ type SendFunc func(peerID string, msg protocol.Message) error
 // Handler processes protocol messages from mobile clients and dispatches
 // them to the appropriate tmux operations.
 type Handler struct {
-	tmux   *tmux.Client
-	send   SendFunc
-	logger *slog.Logger
+	tmux        *tmux.Client
+	sizeTracker *tmux.PaneSizeTracker
+	send        SendFunc
+	logger      *slog.Logger
 
-	mu      sync.Mutex
-	bridges map[string]*tmux.PaneBridge // per-peer attached bridge
+	mu          sync.Mutex
+	bridges     map[string]*tmux.PaneBridge // per-peer attached bridge
+	paneForPeer map[string]string           // peerID -> paneID (for restore on detach)
 }
 
 // NewHandler creates a protocol message handler.
 func NewHandler(tmuxClient *tmux.Client, send SendFunc, logger *slog.Logger) *Handler {
 	return &Handler{
-		tmux:    tmuxClient,
-		send:    send,
-		logger:  logger,
-		bridges: make(map[string]*tmux.PaneBridge),
+		tmux:        tmuxClient,
+		sizeTracker: tmux.NewPaneSizeTracker(tmuxClient),
+		send:        send,
+		logger:      logger,
+		bridges:     make(map[string]*tmux.PaneBridge),
+		paneForPeer: make(map[string]string),
 	}
 }
 
@@ -81,6 +85,12 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 	// Detach from any existing pane first
 	h.detachPeer(peerID)
 
+	// Save original size and resize for mobile
+	if err := h.sizeTracker.SaveAndResize(req.PaneID, req.Cols, req.Rows); err != nil {
+		h.logger.Warn("failed to save/resize pane", "error", err, "pane", req.PaneID)
+		// Non-fatal — continue with attach (AttachPane will also attempt resize)
+	}
+
 	bridge, err := h.tmux.AttachPane(req.PaneID, req.Cols, req.Rows)
 	if err != nil {
 		h.sendError(peerID, "attach_failed", err.Error())
@@ -89,6 +99,7 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 
 	h.mu.Lock()
 	h.bridges[peerID] = bridge
+	h.paneForPeer[peerID] = req.PaneID
 	h.mu.Unlock()
 
 	// Send attached confirmation
@@ -213,17 +224,27 @@ func (h *Handler) streamOutput(peerID string, bridge *tmux.PaneBridge) {
 	}
 }
 
-// detachPeer closes any existing bridge for a peer.
+// detachPeer closes any existing bridge for a peer and restores the
+// original pane size if this was the last mobile client attached.
 func (h *Handler) detachPeer(peerID string) {
 	h.mu.Lock()
 	bridge, ok := h.bridges[peerID]
+	paneID := h.paneForPeer[peerID]
 	if ok {
 		delete(h.bridges, peerID)
+		delete(h.paneForPeer, peerID)
 	}
 	h.mu.Unlock()
 
 	if ok {
 		bridge.Close()
+	}
+
+	// Restore original pane size if this was the last mobile attached
+	if paneID != "" {
+		if err := h.sizeTracker.RestoreIfLast(paneID); err != nil {
+			h.logger.Warn("failed to restore pane size", "error", err, "pane", paneID)
+		}
 	}
 }
 
