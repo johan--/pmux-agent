@@ -19,8 +19,10 @@ type X25519Keypair struct {
 // PairedDevice stores information about a paired mobile device.
 type PairedDevice struct {
 	DeviceID     string    `json:"deviceId"`
+	Name         string    `json:"name,omitempty"`
 	SharedSecret string    `json:"sharedSecret"` // base64-encoded X25519 shared secret
 	PairedAt     time.Time `json:"pairedAt"`
+	LastSeen     int64     `json:"lastSeen,omitempty"` // Unix timestamp, 0 = never seen
 }
 
 // QRPayload is the JSON structure encoded in the pairing QR code.
