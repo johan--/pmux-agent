@@ -207,6 +207,7 @@ func (h *Handler) streamOutput(peerID string, bridge *tmux.PaneBridge) {
 			Data: data,
 		}); err != nil {
 			h.logger.Debug("output stream send failed, stopping", "peer", peerID, "error", err)
+			h.detachPeer(peerID)
 			return
 		}
 	}

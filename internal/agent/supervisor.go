@@ -26,6 +26,9 @@ func EnsureRunning(paths config.Paths) error {
 
 	pidFile := filepath.Join(paths.ConfigDir, pidFileName)
 
+	// TODO: There's a TOCTOU race between isRunning and spawn. Two concurrent
+	// pmux commands could both pass the check and spawn two agents. Use file
+	// locking (syscall.Flock) in Phase 2 to make this atomic.
 	if isRunning(pidFile) {
 		return nil
 	}

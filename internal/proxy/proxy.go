@@ -13,7 +13,7 @@ import (
 func ExecTmux(socket string, args ...string) error {
 	tmuxPath, err := exec.LookPath("tmux")
 	if err != nil {
-		return fmt.Errorf("tmux not found in PATH")
+		return fmt.Errorf("tmux not found in PATH: %w", err)
 	}
 
 	// Build args: tmux -L <socket> [user args...]

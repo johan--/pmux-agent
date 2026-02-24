@@ -121,6 +121,9 @@ func watchTmux(ctx context.Context, cancel context.CancelFunc, tc *tmux.Client, 
 		}
 	}
 
+	// Stop the startup ticker before switching to monitoring interval
+	ticker.Stop()
+
 	// Monitor for tmux server exit
 	monitorTicker := time.NewTicker(tmuxPollInterval)
 	defer monitorTicker.Stop()
