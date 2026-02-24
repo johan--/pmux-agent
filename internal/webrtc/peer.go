@@ -150,11 +150,13 @@ func (pm *PeerManager) handleConnectRequest(mobileDeviceID string) {
 
 	if !isReconnect && currentCount >= pm.MaxPeers {
 		pm.logger.Warn("max peer connections reached", "max", pm.MaxPeers, "mobile", mobileDeviceID)
-		pm.signaling.Send(SignalingMessage{
+		if err := pm.signaling.Send(SignalingMessage{
 			Type:           "error",
 			Error:          "max connections reached",
 			TargetDeviceID: mobileDeviceID,
-		})
+		}); err != nil {
+			pm.logger.Warn("failed to send rejection to mobile", "error", err, "mobile", mobileDeviceID)
+		}
 		return
 	}
 
@@ -195,6 +197,14 @@ func (pm *PeerManager) handleConnectRequest(mobileDeviceID string) {
 	}
 
 	pm.mu.Lock()
+	// Re-check limit under lock to prevent TOCTOU race if HandleSignalingMessage
+	// is called concurrently (the early check above is an unlocked fast path).
+	if _, replacing := pm.peers[mobileDeviceID]; !replacing && len(pm.peers) >= pm.MaxPeers {
+		pm.mu.Unlock()
+		pc.Close()
+		pm.logger.Warn("max peer connections reached (concurrent)", "max", pm.MaxPeers, "mobile", mobileDeviceID)
+		return
+	}
 	pm.peers[mobileDeviceID] = peer
 	pm.mu.Unlock()
 
