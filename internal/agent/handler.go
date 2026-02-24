@@ -1,0 +1,243 @@
+package agent
+
+import (
+	"log/slog"
+	"sync"
+
+	"github.com/shiftinbits/pmux-agent/internal/protocol"
+	"github.com/shiftinbits/pmux-agent/internal/tmux"
+)
+
+// SendFunc sends a protocol message to a specific peer.
+type SendFunc func(peerID string, msg protocol.Message) error
+
+// Handler processes protocol messages from mobile clients and dispatches
+// them to the appropriate tmux operations.
+type Handler struct {
+	tmux   *tmux.Client
+	send   SendFunc
+	logger *slog.Logger
+
+	mu      sync.Mutex
+	bridges map[string]*tmux.PaneBridge // per-peer attached bridge
+}
+
+// NewHandler creates a protocol message handler.
+func NewHandler(tmuxClient *tmux.Client, send SendFunc, logger *slog.Logger) *Handler {
+	return &Handler{
+		tmux:    tmuxClient,
+		send:    send,
+		logger:  logger,
+		bridges: make(map[string]*tmux.PaneBridge),
+	}
+}
+
+// HandleMessage processes an incoming protocol message from a peer.
+// This is the ProtocolHandler callback for the PeerManager.
+func (h *Handler) HandleMessage(peerID string, msg protocol.Message) {
+	h.logger.Debug("handling message", "type", msg.MessageType(), "peer", peerID)
+
+	switch m := msg.(type) {
+	case *protocol.ListSessionsRequest:
+		h.handleListSessions(peerID)
+	case *protocol.AttachRequest:
+		h.handleAttach(peerID, m)
+	case *protocol.DetachRequest:
+		h.handleDetach(peerID)
+	case *protocol.InputRequest:
+		h.handleInput(peerID, m)
+	case *protocol.ResizeRequest:
+		h.handleResize(peerID, m)
+	case *protocol.PingRequest:
+		h.handlePing(peerID)
+	case *protocol.CreateSessionRequest:
+		h.handleCreateSession(peerID, m)
+	case *protocol.KillSessionRequest:
+		h.handleKillSession(peerID, m)
+	default:
+		h.logger.Warn("unknown message type", "type", msg.MessageType(), "peer", peerID)
+	}
+}
+
+// PeerDisconnected cleans up state when a peer disconnects.
+func (h *Handler) PeerDisconnected(peerID string) {
+	h.detachPeer(peerID)
+}
+
+func (h *Handler) handleListSessions(peerID string) {
+	sessions, err := h.tmux.ListAll()
+	if err != nil {
+		h.sendError(peerID, "list_sessions_failed", err.Error())
+		return
+	}
+
+	h.sendMsg(peerID, &protocol.SessionsEvent{
+		Type:     "sessions",
+		Sessions: sessions,
+	})
+}
+
+func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
+	// Detach from any existing pane first
+	h.detachPeer(peerID)
+
+	bridge, err := h.tmux.AttachPane(req.PaneID, req.Cols, req.Rows)
+	if err != nil {
+		h.sendError(peerID, "attach_failed", err.Error())
+		return
+	}
+
+	h.mu.Lock()
+	h.bridges[peerID] = bridge
+	h.mu.Unlock()
+
+	// Send attached confirmation
+	h.sendMsg(peerID, &protocol.AttachedEvent{
+		Type:   "attached",
+		PaneID: req.PaneID,
+	})
+
+	// Send initial pane content
+	if initial := bridge.InitialContent(); initial != "" {
+		h.sendMsg(peerID, &protocol.OutputEvent{
+			Type: "output",
+			Data: []byte(initial),
+		})
+	}
+
+	// Start streaming output in background
+	go h.streamOutput(peerID, bridge)
+}
+
+func (h *Handler) handleDetach(peerID string) {
+	h.detachPeer(peerID)
+	h.sendMsg(peerID, &protocol.DetachedEvent{Type: "detached"})
+}
+
+func (h *Handler) handleInput(peerID string, req *protocol.InputRequest) {
+	h.mu.Lock()
+	bridge := h.bridges[peerID]
+	h.mu.Unlock()
+
+	if bridge == nil {
+		h.sendError(peerID, "not_attached", "no pane attached")
+		return
+	}
+
+	if _, err := bridge.Write(req.Data); err != nil {
+		h.sendError(peerID, "input_failed", err.Error())
+	}
+}
+
+func (h *Handler) handleResize(peerID string, req *protocol.ResizeRequest) {
+	h.mu.Lock()
+	bridge := h.bridges[peerID]
+	h.mu.Unlock()
+
+	if bridge == nil {
+		h.sendError(peerID, "not_attached", "no pane attached")
+		return
+	}
+
+	if err := bridge.Resize(req.Cols, req.Rows); err != nil {
+		h.sendError(peerID, "resize_failed", err.Error())
+	}
+}
+
+func (h *Handler) handlePing(peerID string) {
+	// Latency is measured by the mobile client (ping send time → pong receive time).
+	// The agent responds immediately; the Latency field is unused on the agent side.
+	h.sendMsg(peerID, &protocol.PongEvent{
+		Type:    "pong",
+		Latency: 0,
+	})
+}
+
+func (h *Handler) handleCreateSession(peerID string, req *protocol.CreateSessionRequest) {
+	name := ""
+	if req.Name != nil {
+		name = *req.Name
+	}
+	command := ""
+	if req.Command != nil {
+		command = *req.Command
+	}
+
+	sessionID, err := h.tmux.CreateSession(name, command)
+	if err != nil {
+		h.sendError(peerID, "create_session_failed", err.Error())
+		return
+	}
+
+	h.sendMsg(peerID, &protocol.SessionCreatedEvent{
+		Type:    "session_created",
+		Session: sessionID,
+		Name:    name,
+	})
+}
+
+func (h *Handler) handleKillSession(peerID string, req *protocol.KillSessionRequest) {
+	if err := h.tmux.KillSession(req.Session); err != nil {
+		h.sendError(peerID, "kill_session_failed", err.Error())
+		return
+	}
+
+	h.sendMsg(peerID, &protocol.SessionEndedEvent{
+		Type:    "session_ended",
+		Session: req.Session,
+	})
+}
+
+// streamOutput reads from a PaneBridge and sends output events to the peer.
+// Exits when the bridge is closed or sending fails.
+func (h *Handler) streamOutput(peerID string, bridge *tmux.PaneBridge) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := bridge.Read(buf)
+		if err != nil {
+			return
+		}
+
+		// Copy data since buf is reused
+		data := make([]byte, n)
+		copy(data, buf[:n])
+
+		if err := h.sendMsg(peerID, &protocol.OutputEvent{
+			Type: "output",
+			Data: data,
+		}); err != nil {
+			h.logger.Debug("output stream send failed, stopping", "peer", peerID, "error", err)
+			return
+		}
+	}
+}
+
+// detachPeer closes any existing bridge for a peer.
+func (h *Handler) detachPeer(peerID string) {
+	h.mu.Lock()
+	bridge, ok := h.bridges[peerID]
+	if ok {
+		delete(h.bridges, peerID)
+	}
+	h.mu.Unlock()
+
+	if ok {
+		bridge.Close()
+	}
+}
+
+func (h *Handler) sendMsg(peerID string, msg protocol.Message) error {
+	if err := h.send(peerID, msg); err != nil {
+		h.logger.Debug("send failed", "type", msg.MessageType(), "peer", peerID, "error", err)
+		return err
+	}
+	return nil
+}
+
+func (h *Handler) sendError(peerID string, code string, message string) {
+	h.sendMsg(peerID, &protocol.ErrorEvent{
+		Type:    "error",
+		Code:    code,
+		Message: message,
+	})
+}
