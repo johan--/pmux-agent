@@ -10,8 +10,13 @@ import (
 
 // RunUnpair removes a paired device by device ID prefix.
 // Takes io.Reader for input (confirmation prompt) and io.Writer for output.
+//
+// TODO: When the agent is running, closing the DataChannel to the unpaired
+// device and notifying the signaling server would give immediate feedback.
+// For now, the device is only removed from local storage; the agent will
+// reject messages from the device on its next connection attempt.
 func RunUnpair(args []string, pairedDevicesPath string, r io.Reader, w io.Writer) error {
-	if len(args) == 0 {
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
 		fmt.Fprintln(w, "Usage: pmux unpair <device-id-prefix>")
 		return nil
 	}
@@ -63,9 +68,14 @@ func RunUnpair(args []string, pairedDevicesPath string, r io.Reader, w io.Writer
 	}
 
 	// Confirmation prompt
-	fmt.Fprintf(w, "Unpair device '%s' (%s)? [y/N] ", name, deviceIDShort)
+	fmt.Fprintf(w, "Unpair device '%s' (%s)?\nThis device will need to scan a new QR code to reconnect. [y/N] ", name, deviceIDShort)
 	var response string
-	fmt.Fscanln(r, &response)
+	if _, err := fmt.Fscanln(r, &response); err != nil {
+		// EOF or read error — treat as cancel
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Cancelled.")
+		return nil
+	}
 	if strings.ToLower(response) != "y" {
 		fmt.Fprintln(w, "Cancelled.")
 		return nil

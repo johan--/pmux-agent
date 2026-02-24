@@ -109,6 +109,9 @@ func TestRunUnpair_ConfirmedRemoval(t *testing.T) {
 	}
 
 	output := out.String()
+	if !strings.Contains(output, "scan a new QR code") {
+		t.Errorf("expected QR code warning in prompt, got: %s", output)
+	}
 	if !strings.Contains(output, "unpaired successfully") {
 		t.Errorf("expected success message, got: %s", output)
 	}
@@ -125,6 +128,49 @@ func TestRunUnpair_ConfirmedRemoval(t *testing.T) {
 	}
 	if len(devices) != 2 {
 		t.Errorf("expected 2 remaining devices, got %d", len(devices))
+	}
+}
+
+func TestRunUnpair_EmptyPrefix(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "paired_devices.json")
+
+	var out bytes.Buffer
+	in := strings.NewReader("")
+
+	if err := RunUnpair([]string{""}, path, in, &out); err != nil {
+		t.Fatalf("RunUnpair: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Usage: pmux unpair") {
+		t.Errorf("expected usage message for empty prefix, got: %s", out.String())
+	}
+}
+
+func TestRunUnpair_EOFCancels(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "paired_devices.json")
+	writePairedDevices(t, path)
+
+	var out bytes.Buffer
+	in := strings.NewReader("") // EOF — no input
+
+	if err := RunUnpair([]string{"xyz"}, path, in, &out); err != nil {
+		t.Fatalf("RunUnpair: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Cancelled") {
+		t.Errorf("expected cancelled on EOF, got: %s", output)
+	}
+
+	// Verify device was NOT removed
+	devices, err := auth.LoadPairedDevices(path)
+	if err != nil {
+		t.Fatalf("LoadPairedDevices: %v", err)
+	}
+	if len(devices) != 3 {
+		t.Errorf("expected 3 devices (unchanged), got %d", len(devices))
 	}
 }
 
