@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
+	"os/signal"
 	"syscall"
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
 
+	"github.com/shiftinbits/pmux-agent/internal/agent"
 	"github.com/shiftinbits/pmux-agent/internal/auth"
 	"github.com/shiftinbits/pmux-agent/internal/config"
+	"github.com/shiftinbits/pmux-agent/internal/proxy"
 )
 
 const (
@@ -23,9 +25,19 @@ const (
 func main() {
 	args := os.Args[1:]
 
+	// Internal: agent background mode (spawned by supervisor)
+	if len(args) == 1 && args[0] == "--agent" {
+		runAgent()
+		return
+	}
+
 	// No args: default to new session (or attach if server running)
 	if len(args) == 0 {
-		execTmux()
+		ensureAgent()
+		if err := proxy.ExecTmux(tmuxSocket); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -45,8 +57,46 @@ func main() {
 		return
 	}
 
-	// Everything else: passthrough to tmux -L pmux
-	execTmux(args...)
+	// Everything else: ensure agent is running, then passthrough to tmux -L pmux
+	ensureAgent()
+	if err := proxy.ExecTmux(tmuxSocket, args...); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// ensureAgent starts the background agent if it's not already running.
+func ensureAgent() {
+	paths, err := config.DefaultPaths()
+	if err != nil {
+		return // Non-fatal: agent is optional if not initialized
+	}
+
+	if err := agent.EnsureRunning(paths); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to start agent: %v\n", err)
+	}
+}
+
+// runAgent runs the background WebRTC agent process.
+func runAgent() {
+	paths, err := config.DefaultPaths()
+	if err != nil {
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Handle SIGTERM and SIGINT for graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	if err := agent.Run(ctx, paths); err != nil && err != context.Canceled {
+		os.Exit(1)
+	}
 }
 
 func handleInit() {
@@ -188,24 +238,6 @@ func handlePair() {
 	}
 
 	fmt.Printf("Paired successfully with device %s\n", pairComplete.MobileDeviceID)
-}
-
-func execTmux(args ...string) {
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: tmux not found in PATH\n")
-		os.Exit(1)
-	}
-
-	// Build args: tmux -L pmux [user args...]
-	tmuxArgs := []string{"tmux", "-L", tmuxSocket}
-	tmuxArgs = append(tmuxArgs, args...)
-
-	// Replace current process with tmux
-	if err := syscall.Exec(tmuxPath, tmuxArgs, os.Environ()); err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to exec tmux: %v\n", err)
-		os.Exit(1)
-	}
 }
 
 func printHelp() {

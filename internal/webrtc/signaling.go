@@ -142,6 +142,13 @@ func (sc *SignalingClient) Send(msg SignalingMessage) error {
 	return sc.conn.WriteMessage(websocket.TextMessage, data)
 }
 
+// JWT returns the current JWT token. Thread-safe.
+func (sc *SignalingClient) JWT() string {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.jwt
+}
+
 // Close shuts down the signaling client.
 func (sc *SignalingClient) Close() {
 	sc.mu.Lock()
