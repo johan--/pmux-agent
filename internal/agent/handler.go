@@ -85,13 +85,17 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 	// Detach from any existing pane first
 	h.detachPeer(peerID)
 
-	// Save original size and resize for mobile
+	// Save original size and resize for mobile.
+	// On success, pass 0,0 to AttachPane so it skips its redundant resize.
+	// On failure, pass the real dimensions so AttachPane resizes as fallback.
+	attachCols, attachRows := req.Cols, req.Rows
 	if err := h.sizeTracker.SaveAndResize(req.PaneID, req.Cols, req.Rows); err != nil {
 		h.logger.Warn("failed to save/resize pane", "error", err, "pane", req.PaneID)
-		// Non-fatal — continue with attach (AttachPane will also attempt resize)
+	} else {
+		attachCols, attachRows = 0, 0
 	}
 
-	bridge, err := h.tmux.AttachPane(req.PaneID, req.Cols, req.Rows)
+	bridge, err := h.tmux.AttachPane(req.PaneID, attachCols, attachRows)
 	if err != nil {
 		h.sendError(peerID, "attach_failed", err.Error())
 		return
