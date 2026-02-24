@@ -9,14 +9,21 @@ import (
 )
 
 const (
-	appDir  = "pocketmux"
-	keysDir = "keys"
+	appDir          = "pocketmux"
+	keysDir         = "keys"
+	pairedDevicesFile = "paired_devices.json"
+	configFile      = "config.toml"
+
+	// DefaultServerURL is the production signaling server.
+	DefaultServerURL = "https://signal.pocketmux.dev"
 )
 
 // Paths holds resolved filesystem paths for PocketMux configuration and keys.
 type Paths struct {
-	ConfigDir string // ~/.config/pocketmux
-	KeysDir   string // ~/.config/pocketmux/keys
+	ConfigDir      string // ~/.config/pocketmux
+	KeysDir        string // ~/.config/pocketmux/keys
+	PairedDevices  string // ~/.config/pocketmux/paired_devices.json
+	ConfigFile     string // ~/.config/pocketmux/config.toml
 }
 
 // DefaultPaths returns the standard PocketMux directory paths based on $HOME.
@@ -28,8 +35,10 @@ func DefaultPaths() (Paths, error) {
 
 	configDir := filepath.Join(home, ".config", appDir)
 	return Paths{
-		ConfigDir: configDir,
-		KeysDir:   filepath.Join(configDir, keysDir),
+		ConfigDir:     configDir,
+		KeysDir:       filepath.Join(configDir, keysDir),
+		PairedDevices: filepath.Join(configDir, pairedDevicesFile),
+		ConfigFile:    filepath.Join(configDir, configFile),
 	}, nil
 }
 
