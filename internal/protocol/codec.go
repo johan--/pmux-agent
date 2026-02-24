@@ -1,6 +1,103 @@
 package protocol
 
-import _ "github.com/vmihailenco/msgpack/v5"
+import (
+	"fmt"
 
-// MessagePack encode/decode for wire protocol messages.
-// Implementation: T1.2
+	"github.com/vmihailenco/msgpack/v5"
+)
+
+// messageEnvelope is used to extract the type field for dispatching.
+type messageEnvelope struct {
+	Type string `msgpack:"type"`
+}
+
+// Encode serializes a protocol message to MessagePack binary.
+func Encode(msg Message) ([]byte, error) {
+	data, err := msgpack.Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("encode %s: %w", msg.MessageType(), err)
+	}
+	return data, nil
+}
+
+// Decode deserializes MessagePack binary to a protocol message.
+// It inspects the "type" field first, then decodes into the correct Go struct.
+func Decode(data []byte) (Message, error) {
+	var env messageEnvelope
+	if err := msgpack.Unmarshal(data, &env); err != nil {
+		return nil, fmt.Errorf("decode envelope: %w", err)
+	}
+
+	if env.Type == "" {
+		return nil, fmt.Errorf("decode: missing or empty \"type\" field")
+	}
+
+	var msg Message
+	switch env.Type {
+	// Requests (Mobile → Agent)
+	case "list_sessions":
+		msg = &ListSessionsRequest{}
+	case "attach":
+		msg = &AttachRequest{}
+	case "detach":
+		msg = &DetachRequest{}
+	case "input":
+		msg = &InputRequest{}
+	case "resize":
+		msg = &ResizeRequest{}
+	case "create_session":
+		msg = &CreateSessionRequest{}
+	case "kill_session":
+		msg = &KillSessionRequest{}
+	case "ping":
+		msg = &PingRequest{}
+
+	// Events (Agent → Mobile)
+	case "sessions":
+		msg = &SessionsEvent{}
+	case "output":
+		msg = &OutputEvent{}
+	case "attached":
+		msg = &AttachedEvent{}
+	case "detached":
+		msg = &DetachedEvent{}
+	case "session_created":
+		msg = &SessionCreatedEvent{}
+	case "session_ended":
+		msg = &SessionEndedEvent{}
+	case "error":
+		msg = &ErrorEvent{}
+	case "pong":
+		msg = &PongEvent{}
+
+	default:
+		return nil, fmt.Errorf("decode: unknown message type %q", env.Type)
+	}
+
+	if err := msgpack.Unmarshal(data, msg); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", env.Type, err)
+	}
+
+	return msg, nil
+}
+
+// IsRequest returns true if the message is a Mobile → Agent request.
+func IsRequest(msg Message) bool {
+	switch msg.(type) {
+	case *ListSessionsRequest, *AttachRequest, *DetachRequest,
+		*InputRequest, *ResizeRequest, *CreateSessionRequest,
+		*KillSessionRequest, *PingRequest:
+		return true
+	}
+	return false
+}
+
+// IsEvent returns true if the message is an Agent → Mobile event.
+func IsEvent(msg Message) bool {
+	switch msg.(type) {
+	case *SessionsEvent, *OutputEvent, *AttachedEvent, *DetachedEvent,
+		*SessionCreatedEvent, *SessionEndedEvent, *ErrorEvent, *PongEvent:
+		return true
+	}
+	return false
+}
