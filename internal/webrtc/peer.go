@@ -181,6 +181,11 @@ func (pm *PeerManager) handleConnectRequest(mobileDeviceID string) {
 	pm.ClosePeer(mobileDeviceID)
 
 	// Fetch TURN credentials (skipped when custom API is set, e.g. in tests)
+	//
+	// Security: RTCConfiguration uses default settings which enforce DTLS encryption.
+	// Pion WebRTC requires DTLS by default on all peer connections — there is no
+	// unencrypted fallback. Do NOT set config fields that would weaken or disable
+	// DTLS (e.g., do not set InsecureSkipVerify or disable certificate verification).
 	config := webrtc.Configuration{}
 	if pm.API == nil {
 		iceServers, err := pm.fetchTurnCredentials()
@@ -228,7 +233,10 @@ func (pm *PeerManager) handleConnectRequest(mobileDeviceID string) {
 	// Set up event handlers
 	peer.setupHandlers()
 
-	// Create DataChannel
+	// Create DataChannel with ordered delivery.
+	// Security: ordered=true is required for terminal I/O correctness — out-of-order
+	// delivery would corrupt terminal output. This is explicitly set (not relying on
+	// the WebRTC default) to make the security property visible and testable.
 	dc, err := pc.CreateDataChannel(DataChannelLabel, &webrtc.DataChannelInit{
 		Ordered: boolPtr(true),
 	})
@@ -358,6 +366,12 @@ func (pm *PeerManager) fetchTurnCredentials() ([]webrtc.ICEServer, error) {
 }
 
 // --- Peer methods ---
+//
+// Security: DataChannel messages contain only terminal protocol data (session lists,
+// terminal I/O, pane attach/detach, ping/pong). No private keys, JWTs, or other
+// authentication credentials are ever transmitted over the DataChannel. Authentication
+// is handled entirely through the signaling server over TLS. See protocol/messages.go
+// for the complete set of DataChannel message types.
 
 // setupHandlers configures ICE and connection state handlers on the peer connection.
 func (p *Peer) setupHandlers() {
@@ -391,6 +405,14 @@ func (p *Peer) setupHandlers() {
 
 	p.conn.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		p.logger.Info("peer connection state", "state", state.String())
+
+		if state == webrtc.PeerConnectionStateConnected {
+			// Log DTLS transport security info on successful connection.
+			// This confirms encryption is active and records the cipher suite
+			// for security auditing and potential future fingerprint pinning.
+			p.logDTLSInfo()
+		}
+
 		if state == webrtc.PeerConnectionStateFailed ||
 			state == webrtc.PeerConnectionStateClosed ||
 			state == webrtc.PeerConnectionStateDisconnected {
@@ -420,6 +442,26 @@ func (p *Peer) setupDataChannelHandlers(dc *webrtc.DataChannel) {
 			p.handler(p.DeviceID, decoded)
 		}
 	})
+}
+
+// logDTLSInfo logs DTLS transport stats (cipher suite, state, certificate IDs) when the
+// peer connection is established. This confirms that DTLS encryption is active
+// and provides audit trail data for the security model.
+func (p *Peer) logDTLSInfo() {
+	stats := p.conn.GetStats()
+	for _, s := range stats {
+		transport, ok := s.(webrtc.TransportStats)
+		if !ok {
+			continue
+		}
+		p.logger.Info("DTLS transport active",
+			"dtlsState", transport.DTLSState,
+			"dtlsCipher", transport.DTLSCipher,
+			"srtpCipher", transport.SRTPCipher,
+			"localCertificateId", transport.LocalCertificateID,
+			"remoteCertificateId", transport.RemoteCertificateID,
+		)
+	}
 }
 
 // SendRaw sends pre-encoded bytes directly over the DataChannel.

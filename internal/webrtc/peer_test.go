@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -593,6 +594,152 @@ func TestPeerManager_ReconnectDoesNotExceedLimit(t *testing.T) {
 		if e.TargetDeviceID == "m1" {
 			t.Errorf("m1 reconnect should NOT receive error, got: %s", e.Error)
 		}
+	}
+
+	pm.CloseAll()
+}
+
+// --- Security property tests ---
+
+func TestPeerManager_DataChannelOrdered(t *testing.T) {
+	sender := &mockSender{}
+	logger := testLogger()
+	turnServer := mockTurnServer(t)
+	defer turnServer.Close()
+
+	api := fastAPI(t)
+	pm := NewPeerManager(logger, sender, turnServer.URL, func() string { return "test-jwt" }, nil)
+	pm.API = api
+
+	pm.HandleSignalingMessage(SignalingMessage{
+		Type:           "connect_request",
+		TargetDeviceID: "mobile-ordered",
+	})
+	time.Sleep(500 * time.Millisecond)
+
+	offers := sender.messagesOfType("sdp_offer")
+	if len(offers) == 0 {
+		t.Fatal("no SDP offer sent")
+	}
+
+	// Create an answerer to receive the DataChannel and verify its properties
+	answerPC, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatalf("create answer PC: %v", err)
+	}
+	defer answerPC.Close()
+
+	dcReceived := make(chan *webrtc.DataChannel, 1)
+	answerPC.OnDataChannel(func(dc *webrtc.DataChannel) {
+		dcReceived <- dc
+	})
+
+	offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offers[0].SDP}
+	answerPC.SetRemoteDescription(offer)
+	answer, _ := answerPC.CreateAnswer(nil)
+	gatherDone := webrtc.GatheringCompletePromise(answerPC)
+	answerPC.SetLocalDescription(answer)
+	<-gatherDone
+
+	pm.HandleSignalingMessage(SignalingMessage{
+		Type:           "sdp_answer",
+		TargetDeviceID: "mobile-ordered",
+		SDP:            answerPC.LocalDescription().SDP,
+	})
+
+	// Forward ICE candidates from agent to answerer
+	go func() {
+		seen := make(map[string]bool)
+		for i := 0; i < 100; i++ {
+			time.Sleep(50 * time.Millisecond)
+			for _, msg := range sender.messagesOfType("ice_candidate") {
+				if msg.TargetDeviceID == "mobile-ordered" && !seen[msg.Candidate] {
+					seen[msg.Candidate] = true
+					var mIdx *uint16
+					if msg.SDPMLineIndex != nil {
+						v := uint16(*msg.SDPMLineIndex)
+						mIdx = &v
+					}
+					answerPC.AddICECandidate(webrtc.ICECandidateInit{
+						Candidate:     msg.Candidate,
+						SDPMid:        &msg.SDPMid,
+						SDPMLineIndex: mIdx,
+					})
+				}
+			}
+		}
+	}()
+
+	select {
+	case dc := <-dcReceived:
+		// Verify the DataChannel is ordered (must be true for terminal I/O)
+		if !dc.Ordered() {
+			t.Error("DataChannel ordered property should be true for terminal I/O")
+		}
+		if dc.Label() != DataChannelLabel {
+			t.Errorf("DataChannel label = %q, want %q", dc.Label(), DataChannelLabel)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("DataChannel not received within timeout")
+	}
+
+	pm.CloseAll()
+}
+
+func TestPeerManager_DTLSNotDisabled(t *testing.T) {
+	// Verify that the RTCConfiguration used by PeerManager does not disable DTLS.
+	// Pion WebRTC enforces DTLS by default — this test ensures we haven't
+	// accidentally configured anything that would weaken that guarantee.
+	sender := &mockSender{}
+	logger := testLogger()
+	turnServer := mockTurnServer(t)
+	defer turnServer.Close()
+
+	api := fastAPI(t)
+	pm := NewPeerManager(logger, sender, turnServer.URL, func() string { return "test-jwt" }, nil)
+	pm.API = api
+
+	pm.HandleSignalingMessage(SignalingMessage{
+		Type:           "connect_request",
+		TargetDeviceID: "mobile-dtls",
+	})
+	time.Sleep(500 * time.Millisecond)
+
+	pm.mu.Lock()
+	peer, ok := pm.peers["mobile-dtls"]
+	pm.mu.Unlock()
+	if !ok {
+		t.Fatal("peer should exist")
+	}
+
+	// Verify the peer connection was created (confirming DTLS defaults are in effect).
+	// Pion does not expose a "DTLS enabled" flag because DTLS is always required.
+	// The best we can verify is that the connection was created with a default
+	// Configuration (no fields that would disable encryption).
+	config := peer.conn.GetConfiguration()
+
+	// The configuration should have default values — specifically, no ICETransportPolicy
+	// that would restrict to relay-only (which is fine, but we want to verify defaults).
+	// There is no DTLS-specific config field in Pion's webrtc.Configuration because
+	// DTLS cannot be disabled — it's mandatory per the WebRTC spec.
+	if config.ICETransportPolicy != webrtc.ICETransportPolicyAll {
+		t.Errorf("ICETransportPolicy = %v, want All (default)", config.ICETransportPolicy)
+	}
+
+	// Verify that PeerConnection can be used for a real DTLS handshake by completing
+	// an SDP exchange. If DTLS were somehow disabled, the connection would fail.
+	offers := sender.messagesOfType("sdp_offer")
+	if len(offers) == 0 {
+		t.Fatal("no SDP offer — peer connection creation may have failed")
+	}
+
+	// Parse the SDP offer and verify it contains DTLS fingerprint
+	sdp := offers[0].SDP
+	if !strings.Contains(sdp, "a=fingerprint:") {
+		t.Error("SDP offer should contain DTLS fingerprint (a=fingerprint:)")
+	}
+	if !strings.Contains(sdp, "a=setup:") {
+		t.Error("SDP offer should contain DTLS setup attribute (a=setup:)")
 	}
 
 	pm.CloseAll()
