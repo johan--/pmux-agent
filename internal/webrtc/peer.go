@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -16,6 +17,15 @@ import (
 
 // DataChannelLabel is the name of the WebRTC DataChannel used for terminal protocol.
 const DataChannelLabel = "terminal"
+
+// maxMessageSize is the maximum size in bytes for a single DataChannel message
+// used for terminal I/O. Terminal data is typically small (< 1KB), so 4KB
+// provides ample headroom without excessive memory allocation.
+const maxMessageSize = 4096
+
+// bufferedAmountLowThreshold is the byte threshold at which the DataChannel
+// fires the OnBufferedAmountLow callback, enabling backpressure-aware sending.
+const bufferedAmountLowThreshold = 4096
 
 // TurnCredentials holds STUN/TURN server credentials from the signaling server.
 type TurnCredentials struct {
@@ -96,10 +106,16 @@ func (pm *PeerManager) ClosePeer(deviceID string) {
 	if ok {
 		delete(pm.peers, deviceID)
 	}
+	peerCount := len(pm.peers)
 	pm.mu.Unlock()
 
 	if ok {
 		peer.Close()
+		pm.logger.Info("peer disconnected",
+			"mobile", deviceID,
+			"peerCount", peerCount,
+			"goroutines", runtime.NumGoroutine(),
+		)
 	}
 }
 
@@ -110,11 +126,19 @@ func (pm *PeerManager) CloseAll() {
 	for _, p := range pm.peers {
 		peers = append(peers, p)
 	}
+	closedCount := len(peers)
 	pm.peers = make(map[string]*Peer)
 	pm.mu.Unlock()
 
 	for _, p := range peers {
 		p.Close()
+	}
+
+	if closedCount > 0 {
+		pm.logger.Info("all peers closed",
+			"closedCount", closedCount,
+			"goroutines", runtime.NumGoroutine(),
+		)
 	}
 }
 
@@ -123,6 +147,23 @@ func (pm *PeerManager) PeerCount() int {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	return len(pm.peers)
+}
+
+// BroadcastRaw sends raw bytes to all connected peers' DataChannels.
+// Errors on individual peers are logged but do not stop the broadcast.
+func (pm *PeerManager) BroadcastRaw(data []byte) {
+	pm.mu.Lock()
+	peers := make([]*Peer, 0, len(pm.peers))
+	for _, p := range pm.peers {
+		peers = append(peers, p)
+	}
+	pm.mu.Unlock()
+
+	for _, p := range peers {
+		if err := p.SendRaw(data); err != nil {
+			pm.logger.Debug("broadcast send failed", "peer", p.DeviceID, "error", err)
+		}
+	}
 }
 
 // SendTo sends a protocol message to a specific peer via their DataChannel.
@@ -164,6 +205,11 @@ func (pm *PeerManager) handleConnectRequest(mobileDeviceID string) {
 	pm.ClosePeer(mobileDeviceID)
 
 	// Fetch TURN credentials (skipped when custom API is set, e.g. in tests)
+	//
+	// Security: RTCConfiguration uses default settings which enforce DTLS encryption.
+	// Pion WebRTC requires DTLS by default on all peer connections — there is no
+	// unencrypted fallback. Do NOT set config fields that would weaken or disable
+	// DTLS (e.g., do not set InsecureSkipVerify or disable certificate verification).
 	config := webrtc.Configuration{}
 	if pm.API == nil {
 		iceServers, err := pm.fetchTurnCredentials()
@@ -206,12 +252,22 @@ func (pm *PeerManager) handleConnectRequest(mobileDeviceID string) {
 		return
 	}
 	pm.peers[mobileDeviceID] = peer
+	peerCount := len(pm.peers)
 	pm.mu.Unlock()
+
+	pm.logger.Info("peer connected",
+		"mobile", mobileDeviceID,
+		"peerCount", peerCount,
+		"goroutines", runtime.NumGoroutine(),
+	)
 
 	// Set up event handlers
 	peer.setupHandlers()
 
-	// Create DataChannel
+	// Create DataChannel with ordered delivery.
+	// Security: ordered=true is required for terminal I/O correctness — out-of-order
+	// delivery would corrupt terminal output. This is explicitly set (not relying on
+	// the WebRTC default) to make the security property visible and testable.
 	dc, err := pc.CreateDataChannel(DataChannelLabel, &webrtc.DataChannelInit{
 		Ordered: boolPtr(true),
 	})
@@ -341,6 +397,12 @@ func (pm *PeerManager) fetchTurnCredentials() ([]webrtc.ICEServer, error) {
 }
 
 // --- Peer methods ---
+//
+// Security: DataChannel messages contain only terminal protocol data (session lists,
+// terminal I/O, pane attach/detach, ping/pong). No private keys, JWTs, or other
+// authentication credentials are ever transmitted over the DataChannel. Authentication
+// is handled entirely through the signaling server over TLS. See protocol/messages.go
+// for the complete set of DataChannel message types.
 
 // setupHandlers configures ICE and connection state handlers on the peer connection.
 func (p *Peer) setupHandlers() {
@@ -374,6 +436,14 @@ func (p *Peer) setupHandlers() {
 
 	p.conn.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		p.logger.Info("peer connection state", "state", state.String())
+
+		if state == webrtc.PeerConnectionStateConnected {
+			// Log DTLS transport security info on successful connection.
+			// This confirms encryption is active and records the cipher suite
+			// for security auditing and potential future fingerprint pinning.
+			p.logDTLSInfo()
+		}
+
 		if state == webrtc.PeerConnectionStateFailed ||
 			state == webrtc.PeerConnectionStateClosed ||
 			state == webrtc.PeerConnectionStateDisconnected {
@@ -384,6 +454,11 @@ func (p *Peer) setupHandlers() {
 
 // setupDataChannelHandlers sets up handlers on a DataChannel.
 func (p *Peer) setupDataChannelHandlers(dc *webrtc.DataChannel) {
+	// Set the buffered amount low threshold for backpressure awareness.
+	// When the buffered amount drops below this threshold, the
+	// OnBufferedAmountLow callback fires, enabling flow control.
+	dc.SetBufferedAmountLowThreshold(bufferedAmountLowThreshold)
+
 	dc.OnOpen(func() {
 		p.logger.Info("DataChannel opened", "label", dc.Label())
 	})
@@ -403,6 +478,42 @@ func (p *Peer) setupDataChannelHandlers(dc *webrtc.DataChannel) {
 			p.handler(p.DeviceID, decoded)
 		}
 	})
+}
+
+// logDTLSInfo logs DTLS transport stats (cipher suite, state, certificate IDs) when the
+// peer connection is established. This confirms that DTLS encryption is active
+// and provides audit trail data for the security model.
+func (p *Peer) logDTLSInfo() {
+	stats := p.conn.GetStats()
+	for _, s := range stats {
+		transport, ok := s.(webrtc.TransportStats)
+		if !ok {
+			continue
+		}
+		p.logger.Info("DTLS transport active",
+			"dtlsState", transport.DTLSState,
+			"dtlsCipher", transport.DTLSCipher,
+			"srtpCipher", transport.SRTPCipher,
+			"localCertificateId", transport.LocalCertificateID,
+			"remoteCertificateId", transport.RemoteCertificateID,
+		)
+	}
+}
+
+// SendRaw sends pre-encoded bytes directly over the DataChannel.
+func (p *Peer) SendRaw(data []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed {
+		return fmt.Errorf("peer connection closed")
+	}
+
+	if p.dc == nil {
+		return fmt.Errorf("data channel not established")
+	}
+
+	return p.dc.Send(data)
 }
 
 // SendMessage encodes and sends a protocol message over the DataChannel.

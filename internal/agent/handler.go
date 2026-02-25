@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/shiftinbits/pmux-agent/internal/protocol"
 	"github.com/shiftinbits/pmux-agent/internal/tmux"
@@ -11,29 +13,57 @@ import (
 // SendFunc sends a protocol message to a specific peer.
 type SendFunc func(peerID string, msg protocol.Message) error
 
+// BroadcastRawFunc sends raw pre-encoded bytes to all connected peers.
+type BroadcastRawFunc func(data []byte)
+
 // Handler processes protocol messages from mobile clients and dispatches
 // them to the appropriate tmux operations.
 type Handler struct {
-	tmux        *tmux.Client
-	sizeTracker *tmux.PaneSizeTracker
-	send        SendFunc
-	logger      *slog.Logger
+	tmux         *tmux.Client
+	sizeTracker  *tmux.PaneSizeTracker
+	send         SendFunc
+	broadcastRaw BroadcastRawFunc
+	logger       *slog.Logger
 
-	mu          sync.Mutex
-	bridges     map[string]*tmux.PaneBridge // per-peer attached bridge
-	paneForPeer map[string]string           // peerID -> paneID (for restore on detach)
+	mu           sync.Mutex
+	bridges      map[string]*tmux.PaneBridge // per-peer attached bridge
+	cancels      map[string]context.CancelFunc // per-peer streamOutput cancel
+	paneForPeer  map[string]string           // peerID -> paneID (for restore on detach)
+	lastPingTime map[string]time.Time        // peerID -> last ping received
 }
 
 // NewHandler creates a protocol message handler.
-func NewHandler(tmuxClient *tmux.Client, send SendFunc, logger *slog.Logger) *Handler {
+func NewHandler(tmuxClient *tmux.Client, send SendFunc, broadcastRaw BroadcastRawFunc, logger *slog.Logger) *Handler {
 	return &Handler{
-		tmux:        tmuxClient,
-		sizeTracker: tmux.NewPaneSizeTracker(tmuxClient),
-		send:        send,
-		logger:      logger,
-		bridges:     make(map[string]*tmux.PaneBridge),
-		paneForPeer: make(map[string]string),
+		tmux:         tmuxClient,
+		sizeTracker:  tmux.NewPaneSizeTracker(tmuxClient),
+		send:         send,
+		broadcastRaw: broadcastRaw,
+		logger:       logger,
+		bridges:      make(map[string]*tmux.PaneBridge),
+		cancels:      make(map[string]context.CancelFunc),
+		paneForPeer:  make(map[string]string),
+		lastPingTime: make(map[string]time.Time),
 	}
+}
+
+// BroadcastEmptySessions encodes a SessionsEvent with an empty session list
+// and sends it to all connected peers. Used during graceful shutdown to notify
+// mobile clients that the tmux server has exited.
+func (h *Handler) BroadcastEmptySessions() {
+	msg := &protocol.SessionsEvent{
+		Type:     "sessions",
+		Sessions: []protocol.TmuxSession{},
+	}
+
+	data, err := protocol.Encode(msg)
+	if err != nil {
+		h.logger.Error("failed to encode empty sessions event", "error", err)
+		return
+	}
+
+	h.logger.Info("broadcasting empty sessions to all peers")
+	h.broadcastRaw(data)
 }
 
 // HandleMessage processes an incoming protocol message from a peer.
@@ -65,7 +95,28 @@ func (h *Handler) HandleMessage(peerID string, msg protocol.Message) {
 
 // PeerDisconnected cleans up state when a peer disconnects.
 func (h *Handler) PeerDisconnected(peerID string) {
+	h.mu.Lock()
+	delete(h.lastPingTime, peerID)
+	h.mu.Unlock()
+
 	h.detachPeer(peerID)
+}
+
+// GetStalePeers returns peer IDs that have not sent a ping within the given timeout.
+// A peer with no recorded ping time is not considered stale (it may not have
+// connected long enough to send its first ping).
+func (h *Handler) GetStalePeers(timeout time.Duration) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	now := time.Now()
+	var stale []string
+	for peerID, lastPing := range h.lastPingTime {
+		if now.Sub(lastPing) > timeout {
+			stale = append(stale, peerID)
+		}
+	}
+	return stale
 }
 
 func (h *Handler) handleListSessions(peerID string) {
@@ -101,8 +152,12 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 		return
 	}
 
+	// Create a per-peer context so streamOutput can be cleanly canceled on detach.
+	ctx, cancel := context.WithCancel(context.Background())
+
 	h.mu.Lock()
 	h.bridges[peerID] = bridge
+	h.cancels[peerID] = cancel
 	h.paneForPeer[peerID] = req.PaneID
 	h.mu.Unlock()
 
@@ -120,8 +175,8 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 		})
 	}
 
-	// Start streaming output in background
-	go h.streamOutput(peerID, bridge)
+	// Start streaming output in background with context for lifecycle management
+	go h.streamOutput(ctx, peerID, bridge)
 }
 
 func (h *Handler) handleDetach(peerID string) {
@@ -160,6 +215,11 @@ func (h *Handler) handleResize(peerID string, req *protocol.ResizeRequest) {
 }
 
 func (h *Handler) handlePing(peerID string) {
+	// Record when this peer last sent a ping (for idle detection).
+	h.mu.Lock()
+	h.lastPingTime[peerID] = time.Now()
+	h.mu.Unlock()
+
 	// Latency is measured by the mobile client (ping send time → pong receive time).
 	// The agent responds immediately; the Latency field is unused on the agent side.
 	h.sendMsg(peerID, &protocol.PongEvent{
@@ -204,12 +264,22 @@ func (h *Handler) handleKillSession(peerID string, req *protocol.KillSessionRequ
 }
 
 // streamOutput reads from a PaneBridge and sends output events to the peer.
-// Exits when the bridge is closed or sending fails.
-func (h *Handler) streamOutput(peerID string, bridge *tmux.PaneBridge) {
+// Exits when the context is canceled, the bridge is closed, or sending fails.
+func (h *Handler) streamOutput(ctx context.Context, peerID string, bridge *tmux.PaneBridge) {
 	buf := make([]byte, 4096)
 	for {
+		// Check context before blocking on Read
+		if ctx.Err() != nil {
+			h.logger.Debug("streamOutput context canceled", "peer", peerID)
+			return
+		}
+
 		n, err := bridge.Read(buf)
 		if err != nil {
+			// Distinguish between context cancellation and bridge errors
+			if ctx.Err() != nil {
+				h.logger.Debug("streamOutput stopped by context", "peer", peerID)
+			}
 			return
 		}
 
@@ -228,17 +298,26 @@ func (h *Handler) streamOutput(peerID string, bridge *tmux.PaneBridge) {
 	}
 }
 
-// detachPeer closes any existing bridge for a peer and restores the
-// original pane size if this was the last mobile client attached.
+// detachPeer cancels the streamOutput goroutine, closes any existing bridge
+// for a peer, and restores the original pane size if this was the last
+// mobile client attached.
 func (h *Handler) detachPeer(peerID string) {
 	h.mu.Lock()
 	bridge, ok := h.bridges[peerID]
+	cancel := h.cancels[peerID]
 	paneID := h.paneForPeer[peerID]
 	if ok {
 		delete(h.bridges, peerID)
+		delete(h.cancels, peerID)
 		delete(h.paneForPeer, peerID)
 	}
 	h.mu.Unlock()
+
+	// Cancel the streamOutput context first so the goroutine can exit
+	// before we close the bridge underneath it.
+	if cancel != nil {
+		cancel()
+	}
 
 	if ok {
 		bridge.Close()
