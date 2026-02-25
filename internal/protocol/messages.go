@@ -9,9 +9,9 @@ type Message interface {
 	MessageType() string
 }
 
-// --- Mobile → Agent (Requests) ---
+// --- Mobile → Host (Requests) ---
 
-// ListSessionsRequest requests the full session tree from the agent.
+// ListSessionsRequest requests the full session tree from the host.
 type ListSessionsRequest struct {
 	Type string `msgpack:"type"`
 }
@@ -76,7 +76,7 @@ type PingRequest struct {
 
 func (m *PingRequest) MessageType() string { return "ping" }
 
-// --- Agent → Mobile (Events) ---
+// --- Host → Mobile (Events) ---
 
 // SessionsEvent returns the full session tree.
 type SessionsEvent struct {

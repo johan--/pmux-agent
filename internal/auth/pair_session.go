@@ -62,15 +62,19 @@ type PairCompleteMessage struct {
 }
 
 // InitiatePairing calls the server to create a pairing session.
-func InitiatePairing(id *Identity, x25519PubKeyBase64 string, serverURL string, client *http.Client) (*PairInitiateResponse, error) {
+// The name parameter is an optional human-readable host name sent to the server
+// so it can be displayed on paired mobile devices.
+func InitiatePairing(id *Identity, x25519PubKeyBase64 string, serverURL string, client *http.Client, name string) (*PairInitiateResponse, error) {
 	reqBody := struct {
 		DeviceID       string `json:"deviceId"`
 		PublicKey      string `json:"publicKey"`
 		X25519PubKey   string `json:"x25519PublicKey"`
+		Name           string `json:"name,omitempty"`
 	}{
 		DeviceID:     id.DeviceID,
 		PublicKey:    id.PublicKeyBase64(),
 		X25519PubKey: x25519PubKeyBase64,
+		Name:         name,
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {

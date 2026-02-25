@@ -12,6 +12,7 @@ require (
 
 require (
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/dtls/v3 v3.1.2 // indirect
 	github.com/pion/interceptor v0.1.44 // indirect

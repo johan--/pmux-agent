@@ -51,7 +51,7 @@ func TestInitiatePairing(t *testing.T) {
 		}))
 		defer server.Close()
 
-		resp, err := InitiatePairing(id, "x25519key==", server.URL, server.Client())
+		resp, err := InitiatePairing(id, "x25519key==", server.URL, server.Client(), "test-host")
 		if err != nil {
 			t.Fatalf("InitiatePairing() error: %v", err)
 		}
@@ -67,7 +67,7 @@ func TestInitiatePairing(t *testing.T) {
 		}))
 		defer server.Close()
 
-		_, err := InitiatePairing(id, "x25519key==", server.URL, server.Client())
+		_, err := InitiatePairing(id, "x25519key==", server.URL, server.Client(), "test-host")
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -83,7 +83,7 @@ func TestInitiatePairing(t *testing.T) {
 		}))
 		defer server.Close()
 
-		_, err := InitiatePairing(id, "x25519key==", server.URL, server.Client())
+		_, err := InitiatePairing(id, "x25519key==", server.URL, server.Client(), "test-host")
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -93,7 +93,7 @@ func TestInitiatePairing(t *testing.T) {
 	})
 
 	t.Run("network error", func(t *testing.T) {
-		_, err := InitiatePairing(id, "x25519key==", "http://localhost:1", http.DefaultClient)
+		_, err := InitiatePairing(id, "x25519key==", "http://localhost:1", http.DefaultClient, "test-host")
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

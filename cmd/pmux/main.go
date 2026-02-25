@@ -77,11 +77,11 @@ func main() {
 	case "unpair":
 		handleUnpair(args[1:])
 		return
-	case "agent-status":
-		handleAgentStatus()
+	case "host-status":
+		handleHostStatus()
 		return
-	case "agent-stop":
-		handleAgentStop()
+	case "host-stop":
+		handleHostStop()
 		return
 	case "--version", "-v":
 		fmt.Printf("pmux version %s\n", version)
@@ -107,7 +107,7 @@ func ensureAgent() {
 	}
 
 	if err := agent.EnsureRunning(paths); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to start agent: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: failed to start host: %v\n", err)
 	}
 }
 
@@ -182,8 +182,12 @@ func handleInit() {
 			fmt.Fprintf(os.Stderr, "⚠ failed to load existing identity: %v\n", err)
 			os.Exit(1)
 		}
+		cfg, _ := config.LoadConfig(paths.ConfigFile)
 		fmt.Printf("Identity already exists.\n")
 		fmt.Printf("Device ID: %s\n", id.DeviceID)
+		if cfg.Name != "" {
+			fmt.Printf("Host name: %s\n", cfg.Name)
+		}
 		return
 	}
 
@@ -199,8 +203,26 @@ func handleInit() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Identity generated.\n")
+	// Prompt for host name (default: OS hostname)
+	defaultName := config.DefaultHostName()
+	fmt.Printf("Host name [%s]: ", defaultName)
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	if input == "" {
+		input = defaultName
+	}
+
+	// Save config
+	cfg := config.Config{Name: input}
+	if err := config.SaveConfig(paths.ConfigFile, cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ failed to save config: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\nIdentity generated.\n")
 	fmt.Printf("Device ID: %s\n", id.DeviceID)
+	fmt.Printf("Host name: %s\n", input)
 	fmt.Printf("Keys saved to: %s\n", paths.KeysDir)
 }
 
@@ -232,10 +254,17 @@ func handlePair() {
 		os.Exit(1)
 	}
 
+	// Load host name from config, fall back to OS hostname
+	cfg, _ := config.LoadConfig(paths.ConfigFile)
+	hostName := cfg.Name
+	if hostName == "" {
+		hostName = config.DefaultHostName()
+	}
+
 	// Initiate pairing with signaling server
 	fmt.Println("Contacting signaling server...")
 	httpClient := &http.Client{Timeout: 10 * time.Second}
-	pairResp, err := auth.InitiatePairing(id, x25519kp.PublicKeyBase64(), serverURL, httpClient)
+	pairResp, err := auth.InitiatePairing(id, x25519kp.PublicKeyBase64(), serverURL, httpClient, hostName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ failed to initiate pairing: %v\n", err)
 		os.Exit(1)
@@ -334,7 +363,7 @@ func handleDevices() {
 	}
 }
 
-func handleAgentStatus() {
+func handleHostStatus() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
@@ -345,17 +374,17 @@ func handleAgentStatus() {
 
 	pid, err := agent.ReadPIDFile(pidFile)
 	if err != nil {
-		fmt.Println("Agent is not running")
+		fmt.Println("Host is not running")
 		os.Exit(1)
 	}
 
 	if !agent.IsProcessRunning(pid) {
-		fmt.Println("Agent is not running (stale PID file)")
+		fmt.Println("Host is not running (stale PID file)")
 		agent.CleanStalePIDFile(pidFile)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Agent is running (PID %d)\n", pid)
+	fmt.Printf("Host is running (PID %d)\n", pid)
 
 	// Try to get process uptime via ps
 	out, err := exec.Command("ps", "-o", "etime=", "-p", fmt.Sprintf("%d", pid)).Output()
@@ -366,8 +395,8 @@ func handleAgentStatus() {
 		}
 	}
 
-	// Show last 5 lines of agent log
-	logFile := filepath.Join(paths.ConfigDir, "agent.log")
+	// Show last 5 lines of host log
+	logFile := filepath.Join(paths.ConfigDir, "host.log")
 	lines, err := tailFile(logFile, 5)
 	if err == nil && len(lines) > 0 {
 		fmt.Println("\nRecent log:")
@@ -377,7 +406,7 @@ func handleAgentStatus() {
 	}
 }
 
-func handleAgentStop() {
+func handleHostStop() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
@@ -388,12 +417,12 @@ func handleAgentStop() {
 
 	pid, err := agent.ReadPIDFile(pidFile)
 	if err != nil {
-		fmt.Println("Agent is not running")
+		fmt.Println("Host is not running")
 		os.Exit(1)
 	}
 
 	if !agent.IsProcessRunning(pid) {
-		fmt.Println("Agent is not running (stale PID file cleaned up)")
+		fmt.Println("Host is not running (stale PID file cleaned up)")
 		agent.RemovePIDFile(pidFile)
 		os.Exit(0)
 	}
@@ -427,19 +456,19 @@ func handleAgentStop() {
 			if err := process.Signal(syscall.SIGKILL); err != nil {
 				// Process may have exited between the last check and now
 				if !agent.IsProcessRunning(pid) {
-					fmt.Println("Agent stopped")
+					fmt.Println("Host stopped")
 					agent.RemovePIDFile(pidFile)
 					return
 				}
 				fmt.Fprintf(os.Stderr, "⚠ failed to send SIGKILL to PID %d: %v\n", pid, err)
 				os.Exit(1)
 			}
-			fmt.Println("Agent forcefully killed")
+			fmt.Println("Host forcefully killed")
 			agent.RemovePIDFile(pidFile)
 			return
 		case <-ticker.C:
 			if !agent.IsProcessRunning(pid) {
-				fmt.Println("Agent stopped")
+				fmt.Println("Host stopped")
 				agent.RemovePIDFile(pidFile)
 				return
 			}
@@ -467,15 +496,15 @@ func tailFile(path string, n int) ([]string, error) {
 }
 
 func printHelp() {
-	fmt.Println(`pmux — PocketMux terminal access agent
+	fmt.Println(`pmux — PocketMux terminal access host
 
 PocketMux commands:
   init          Generate identity and register with signaling server
   pair          Pair with a mobile device (displays QR code)
   devices       List paired mobile devices
   unpair        Remove a paired mobile device
-  agent-status  Show agent process status and recent logs
-  agent-stop    Stop the background agent process
+  host-status   Show host process status and recent logs
+  host-stop     Stop the background host process
   --version     Show version
   --help        Show this help
 
@@ -487,5 +516,5 @@ Examples:
   pmux new-session -s work      Named session
   pmux attach -t work           Attach to session
   pmux ls                       List sessions
-  pmux kill-server              Stop tmux server + agent`)
+  pmux kill-server              Stop tmux server + host`)
 }

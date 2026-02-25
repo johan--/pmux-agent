@@ -10,7 +10,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// --- Round-trip tests for every AgentRequest type ---
+// --- Round-trip tests for every HostRequest type ---
 
 func TestRoundTripListSessions(t *testing.T) {
 	msg := &ListSessionsRequest{Type: "list_sessions"}
@@ -189,7 +189,7 @@ func TestRoundTripPing(t *testing.T) {
 	}
 }
 
-// --- Round-trip tests for every AgentEvent type ---
+// --- Round-trip tests for every HostEvent type ---
 
 func TestRoundTripSessions(t *testing.T) {
 	msg := &SessionsEvent{

@@ -34,7 +34,7 @@ func Decode(data []byte) (Message, error) {
 
 	var msg Message
 	switch env.Type {
-	// Requests (Mobile → Agent)
+	// Requests (Mobile → Host)
 	case "list_sessions":
 		msg = &ListSessionsRequest{}
 	case "attach":
@@ -52,7 +52,7 @@ func Decode(data []byte) (Message, error) {
 	case "ping":
 		msg = &PingRequest{}
 
-	// Events (Agent → Mobile)
+	// Events (Host → Mobile)
 	case "sessions":
 		msg = &SessionsEvent{}
 	case "output":
@@ -81,7 +81,7 @@ func Decode(data []byte) (Message, error) {
 	return msg, nil
 }
 
-// IsRequest returns true if the message is a Mobile → Agent request.
+// IsRequest returns true if the message is a Mobile → Host request.
 func IsRequest(msg Message) bool {
 	switch msg.(type) {
 	case *ListSessionsRequest, *AttachRequest, *DetachRequest,
@@ -92,7 +92,7 @@ func IsRequest(msg Message) bool {
 	return false
 }
 
-// IsEvent returns true if the message is an Agent → Mobile event.
+// IsEvent returns true if the message is a Host → Mobile event.
 func IsEvent(msg Message) bool {
 	switch msg.(type) {
 	case *SessionsEvent, *OutputEvent, *AttachedEvent, *DetachedEvent,

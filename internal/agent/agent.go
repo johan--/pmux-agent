@@ -63,7 +63,7 @@ func defaultWatchConfig() watchConfig {
 // Blocks until the context is canceled or the tmux server exits.
 func Run(ctx context.Context, paths config.Paths) error {
 	// Set up file logging
-	logFile := filepath.Join(paths.ConfigDir, "agent.log")
+	logFile := filepath.Join(paths.ConfigDir, "host.log")
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
@@ -73,7 +73,7 @@ func Run(ctx context.Context, paths config.Paths) error {
 	logger := slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
-	logger.Info("agent starting", "pid", os.Getpid())
+	logger.Info("host starting", "pid", os.Getpid())
 
 	// Write our own PID file (overwrites the one written by spawn with the
 	// actual agent PID — they match in practice, but this ensures correctness).
@@ -132,7 +132,7 @@ func Run(ctx context.Context, paths config.Paths) error {
 	err = signalingClient.Run(ctx)
 
 	// Cleanup
-	logger.Info("agent shutting down")
+	logger.Info("host shutting down")
 	peerManager.CloseAll()
 	signalingClient.Close()
 	RemovePIDFile(pidFile)
@@ -189,7 +189,7 @@ func watchTmux(ctx context.Context, cancel context.CancelFunc, tc serverChecker,
 					"grace", cfg.gracePeriod.String())
 
 				if gracePeriodExpired(ctx, tc, cfg, logger) {
-					logger.Info("grace period expired, shutting down agent")
+					logger.Info("grace period expired, shutting down host")
 					onGraceExpired()
 					cancel()
 					return

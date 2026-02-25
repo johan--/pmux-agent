@@ -54,7 +54,7 @@ func spawn(pidFile string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start agent: %w", err)
+		return fmt.Errorf("start host: %w", err)
 	}
 
 	// Write the child process PID so subsequent pmux commands can detect

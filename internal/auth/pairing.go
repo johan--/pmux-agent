@@ -33,8 +33,8 @@ type PairedDevice struct {
 // QRPayload holds the data encoded in the pairing QR code.
 type QRPayload struct {
 	PairingCode        string
-	AgentX25519PubKey  string
-	AgentDeviceID      string
+	HostX25519PubKey  string
+	HostDeviceID      string
 	ServerURL          string
 }
 
@@ -83,11 +83,11 @@ func (kp *X25519Keypair) ComputeSharedSecret(peerPubKeyBase64 string) (string, e
 // Format: pairingCode|x25519PubKey|deviceId[|serverUrl]
 // The server URL is omitted when it matches the production default to minimize
 // QR code size. The mobile app falls back to the default when absent.
-func BuildQRPayload(pairingCode string, x25519PubKeyBase64 string, agentDeviceID string, serverURL string) (string, error) {
+func BuildQRPayload(pairingCode string, x25519PubKeyBase64 string, hostDeviceID string, serverURL string) (string, error) {
 	if serverURL == config.DefaultServerURL {
-		return pairingCode + "|" + x25519PubKeyBase64 + "|" + agentDeviceID, nil
+		return pairingCode + "|" + x25519PubKeyBase64 + "|" + hostDeviceID, nil
 	}
-	return pairingCode + "|" + x25519PubKeyBase64 + "|" + agentDeviceID + "|" + serverURL, nil
+	return pairingCode + "|" + x25519PubKeyBase64 + "|" + hostDeviceID + "|" + serverURL, nil
 }
 
 // LoadPairedDevices reads the paired devices list from disk.
