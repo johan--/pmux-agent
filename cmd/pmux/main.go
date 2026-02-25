@@ -57,7 +57,7 @@ func main() {
 	if len(args) == 0 {
 		ensureAgent()
 		if err := proxy.ExecTmux(tmuxSocket); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -94,7 +94,7 @@ func main() {
 	// Everything else: ensure agent is running, then passthrough to tmux -L pmux
 	ensureAgent()
 	if err := proxy.ExecTmux(tmuxSocket, args...); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -123,12 +123,12 @@ func runAgent(cpuProfile, memProfile string) {
 	if cpuProfile != "" {
 		f, err := os.Create(cpuProfile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: could not create CPU profile: %v\n", err)
+			fmt.Fprintf(os.Stderr, "⚠ could not create CPU profile: %v\n", err)
 			os.Exit(1)
 		}
 		if err := pprof.StartCPUProfile(f); err != nil {
 			f.Close()
-			fmt.Fprintf(os.Stderr, "error: could not start CPU profile: %v\n", err)
+			fmt.Fprintf(os.Stderr, "⚠ could not start CPU profile: %v\n", err)
 			os.Exit(1)
 		}
 		defer func() {
@@ -153,11 +153,11 @@ func runAgent(cpuProfile, memProfile string) {
 	if memProfile != "" {
 		f, err := os.Create(memProfile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: could not create memory profile: %v\n", err)
+			fmt.Fprintf(os.Stderr, "⚠ could not create memory profile: %v\n", err)
 		} else {
 			runtime.GC() // Get up-to-date heap statistics
 			if err := pprof.WriteHeapProfile(f); err != nil {
-				fmt.Fprintf(os.Stderr, "error: could not write memory profile: %v\n", err)
+				fmt.Fprintf(os.Stderr, "⚠ could not write memory profile: %v\n", err)
 			}
 			f.Close()
 		}
@@ -171,7 +171,7 @@ func runAgent(cpuProfile, memProfile string) {
 func handleInit() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 
@@ -179,7 +179,7 @@ func handleInit() {
 	if auth.HasIdentity(paths.KeysDir) {
 		id, err := auth.LoadIdentity(paths.KeysDir)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: failed to load existing identity: %v\n", err)
+			fmt.Fprintf(os.Stderr, "⚠ failed to load existing identity: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Printf("Identity already exists.\n")
@@ -189,13 +189,13 @@ func handleInit() {
 
 	// Create directories and generate identity
 	if err := paths.EnsureDirs(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 
 	id, err := auth.GenerateIdentity(paths.KeysDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to generate identity: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to generate identity: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -207,29 +207,28 @@ func handleInit() {
 func handlePair() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 
 	// Must have identity first
 	if !auth.HasIdentity(paths.KeysDir) {
-		fmt.Fprintf(os.Stderr, "error: no identity found. Run 'pmux init' first.\n")
+		fmt.Fprintf(os.Stderr, "⚠ no identity found. Run 'pmux init' first.\n")
 		os.Exit(1)
 	}
 
 	id, err := auth.LoadIdentity(paths.KeysDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to load identity: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to load identity: %v\n", err)
 		os.Exit(1)
 	}
 
-	// TODO: read server URL from config file; fall back to default
-	serverURL := config.DefaultServerURL
+	serverURL := config.ServerURL()
 
 	// Generate X25519 ephemeral keypair for key exchange
 	x25519kp, err := auth.GenerateX25519Keypair()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to generate X25519 keypair: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to generate X25519 keypair: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -238,7 +237,7 @@ func handlePair() {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	pairResp, err := auth.InitiatePairing(id, x25519kp.PublicKeyBase64(), serverURL, httpClient)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to initiate pairing: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to initiate pairing: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -250,13 +249,13 @@ func handlePair() {
 		serverURL,
 	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to build QR payload: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to build QR payload: %v\n", err)
 		os.Exit(1)
 	}
 
-	qr, err := qrcode.New(qrData, qrcode.Medium)
+	qr, err := qrcode.New(qrData, qrcode.Low)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to generate QR code: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to generate QR code: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -269,7 +268,7 @@ func handlePair() {
 	// Get JWT for WebSocket auth
 	jwt, err := auth.ExchangeToken(id, serverURL, httpClient)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to authenticate: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to authenticate: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -279,20 +278,20 @@ func handlePair() {
 
 	pairComplete, err := auth.WaitForPairComplete(ctx, serverURL, jwt)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: pairing failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ pairing failed: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Compute shared secret via X25519 key exchange
 	sharedSecret, err := x25519kp.ComputeSharedSecret(pairComplete.MobileX25519PublicKey)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: key exchange failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ key exchange failed: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Store paired device
 	if err := paths.EnsureDirs(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 
@@ -302,7 +301,7 @@ func handlePair() {
 		PairedAt:     time.Now(),
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to save paired device: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to save paired device: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -312,12 +311,12 @@ func handlePair() {
 func handleUnpair(args []string) {
 	paths, err := config.DefaultPaths()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 
 	if err := agent.RunUnpair(args, paths.PairedDevices, os.Stdin, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -325,12 +324,12 @@ func handleUnpair(args []string) {
 func handleDevices() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 
 	if err := agent.RunDevices(paths.PairedDevices, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -338,7 +337,7 @@ func handleDevices() {
 func handleAgentStatus() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 
@@ -381,7 +380,7 @@ func handleAgentStatus() {
 func handleAgentStop() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 
@@ -402,12 +401,12 @@ func handleAgentStop() {
 	// Send SIGTERM for graceful shutdown
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to find process %d: %v\n", pid, err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to find process %d: %v\n", pid, err)
 		os.Exit(1)
 	}
 
 	if err := process.Signal(syscall.SIGTERM); err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to send SIGTERM to PID %d: %v\n", pid, err)
+		fmt.Fprintf(os.Stderr, "⚠ failed to send SIGTERM to PID %d: %v\n", pid, err)
 		os.Exit(1)
 	}
 
@@ -432,7 +431,7 @@ func handleAgentStop() {
 					agent.RemovePIDFile(pidFile)
 					return
 				}
-				fmt.Fprintf(os.Stderr, "error: failed to send SIGKILL to PID %d: %v\n", pid, err)
+				fmt.Fprintf(os.Stderr, "⚠ failed to send SIGKILL to PID %d: %v\n", pid, err)
 				os.Exit(1)
 			}
 			fmt.Println("Agent forcefully killed")

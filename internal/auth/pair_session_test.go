@@ -71,8 +71,8 @@ func TestInitiatePairing(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if !strings.Contains(err.Error(), "pair initiate failed") {
-			t.Errorf("error = %q, want substring %q", err.Error(), "pair initiate failed")
+		if !strings.Contains(err.Error(), "server error (400)") {
+			t.Errorf("error = %q, want substring %q", err.Error(), "server error (400)")
 		}
 	})
 

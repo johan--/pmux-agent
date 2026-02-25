@@ -2,7 +2,6 @@ package auth
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -108,28 +107,25 @@ func TestComputeSharedSecret(t *testing.T) {
 }
 
 func TestBuildQRPayload(t *testing.T) {
-	payload, err := BuildQRPayload("ABC123", "x25519pubkey==", "device-abc", "https://signal.pocketmux.dev")
-	if err != nil {
-		t.Fatalf("BuildQRPayload() error: %v", err)
-	}
+	t.Run("produces pipe-delimited format", func(t *testing.T) {
+		payload, err := BuildQRPayload("ABC123", "x25519pubkey==", "device-abc", "http://localhost:8787")
+		if err != nil {
+			t.Fatalf("BuildQRPayload() error: %v", err)
+		}
+		want := "ABC123|x25519pubkey==|device-abc|http://localhost:8787"
+		if payload != want {
+			t.Errorf("payload = %q, want %q", payload, want)
+		}
+	})
 
-	t.Run("produces valid JSON", func(t *testing.T) {
-		var parsed QRPayload
-		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-			t.Fatalf("JSON parse error: %v", err)
+	t.Run("omits default server URL", func(t *testing.T) {
+		payload, err := BuildQRPayload("ABC123", "x25519pubkey==", "device-abc", "https://signal.pocketmux.dev")
+		if err != nil {
+			t.Fatalf("BuildQRPayload() error: %v", err)
 		}
-
-		if parsed.PairingCode != "ABC123" {
-			t.Errorf("pairingCode = %q, want %q", parsed.PairingCode, "ABC123")
-		}
-		if parsed.AgentX25519PubKey != "x25519pubkey==" {
-			t.Errorf("agentX25519PublicKey = %q, want %q", parsed.AgentX25519PubKey, "x25519pubkey==")
-		}
-		if parsed.AgentDeviceID != "device-abc" {
-			t.Errorf("agentDeviceId = %q, want %q", parsed.AgentDeviceID, "device-abc")
-		}
-		if parsed.ServerURL != "https://signal.pocketmux.dev" {
-			t.Errorf("serverUrl = %q, want %q", parsed.ServerURL, "https://signal.pocketmux.dev")
+		want := "ABC123|x25519pubkey==|device-abc"
+		if payload != want {
+			t.Errorf("payload = %q, want %q", payload, want)
 		}
 	})
 }

@@ -16,7 +16,19 @@ const (
 
 	// DefaultServerURL is the production signaling server.
 	DefaultServerURL = "https://signal.pocketmux.dev"
+
+	// EnvServerURL is the environment variable to override the signaling server URL.
+	EnvServerURL = "PMUX_AGENT_SIGNAL_URL"
 )
+
+// ServerURL returns the signaling server URL. It checks PMUX_AGENT_SIGNAL_URL
+// first, falling back to DefaultServerURL.
+func ServerURL() string {
+	if v := os.Getenv(EnvServerURL); v != "" {
+		return v
+	}
+	return DefaultServerURL
+}
 
 // Paths holds resolved filesystem paths for PocketMux configuration and keys.
 type Paths struct {

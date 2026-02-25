@@ -4,14 +4,49 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// connError extracts a clean message from Go's verbose network errors.
+// "Post http://...: dial tcp ...: connect: connection refused" → "server unreachable (connection refused)"
+func connError(err error) string {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return fmt.Sprintf("cannot resolve server hostname %q", dnsErr.Name)
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		if opErr.Timeout() {
+			return "server connection timed out"
+		}
+		return fmt.Sprintf("server unreachable (%s)", opErr.Err)
+	}
+	return err.Error()
+}
+
+// serverError extracts a short error message from a non-200 HTTP response body.
+// Tries JSON {"error":"..."} first, falls back to truncated raw body.
+func serverError(statusCode int, body []byte) string {
+	var parsed struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &parsed) == nil && parsed.Error != "" {
+		return fmt.Sprintf("server error (%d): %s", statusCode, parsed.Error)
+	}
+	msg := strings.TrimSpace(string(body))
+	if len(msg) > 200 {
+		msg = msg[:200] + "..."
+	}
+	return fmt.Sprintf("server error (%d): %s", statusCode, msg)
+}
 
 // PairInitiateResponse is the server response from POST /auth/pair/initiate.
 type PairInitiateResponse struct {
@@ -45,7 +80,7 @@ func InitiatePairing(id *Identity, x25519PubKeyBase64 string, serverURL string, 
 	url := strings.TrimRight(serverURL, "/") + "/auth/pair/initiate"
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("pair initiate request: %w", err)
+		return nil, fmt.Errorf("%s", connError(err))
 	}
 	defer resp.Body.Close()
 
@@ -54,13 +89,13 @@ func InitiatePairing(id *Identity, x25519PubKeyBase64 string, serverURL string, 
 		return nil, fmt.Errorf("read pair initiate response: %w", err)
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s", serverError(resp.StatusCode, respBody))
+	}
+
 	var result PairInitiateResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("parse pair initiate response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("pair initiate failed (%d): %s", resp.StatusCode, result.Error)
 	}
 
 	if result.PairingCode == "" {
@@ -82,7 +117,7 @@ func WaitForPairComplete(ctx context.Context, serverURL string, jwt string) (*Pa
 	dialer := websocket.DefaultDialer
 	conn, _, err := dialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("connect to signaling server: %w", err)
+		return nil, fmt.Errorf("connect to signaling server: %s", connError(err))
 	}
 	defer conn.Close()
 

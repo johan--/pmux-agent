@@ -40,7 +40,7 @@ func ExchangeToken(id *Identity, serverURL string, client *http.Client) (string,
 	url := strings.TrimRight(serverURL, "/") + "/auth/token"
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("token exchange request: %w", err)
+		return "", fmt.Errorf("%s", connError(err))
 	}
 	defer resp.Body.Close()
 
@@ -49,13 +49,13 @@ func ExchangeToken(id *Identity, serverURL string, client *http.Client) (string,
 		return "", fmt.Errorf("read token response: %w", err)
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("%s", serverError(resp.StatusCode, respBody))
+	}
+
 	var tokenResp TokenResponse
 	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
 		return "", fmt.Errorf("parse token response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("token exchange failed (%d): %s", resp.StatusCode, tokenResp.Error)
 	}
 
 	if tokenResp.Token == "" {

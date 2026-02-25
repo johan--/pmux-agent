@@ -50,8 +50,8 @@ func TestExchangeToken(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if !strings.Contains(err.Error(), "token exchange failed") {
-			t.Errorf("error = %q, want substring %q", err.Error(), "token exchange failed")
+		if !strings.Contains(err.Error(), "server error (401)") {
+			t.Errorf("error = %q, want substring %q", err.Error(), "server error (401)")
 		}
 	})
 

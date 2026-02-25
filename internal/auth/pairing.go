@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/shiftinbits/pmux-agent/internal/config"
 )
 
 // X25519Keypair holds an ephemeral X25519 keypair for key exchange during pairing.
@@ -28,12 +30,12 @@ type PairedDevice struct {
 	LastSeen int64 `json:"lastSeen,omitempty"`
 }
 
-// QRPayload is the JSON structure encoded in the pairing QR code.
+// QRPayload holds the data encoded in the pairing QR code.
 type QRPayload struct {
-	PairingCode        string `json:"pairingCode"`
-	AgentX25519PubKey  string `json:"agentX25519PublicKey"`
-	AgentDeviceID      string `json:"agentDeviceId"`
-	ServerURL          string `json:"serverUrl"`
+	PairingCode        string
+	AgentX25519PubKey  string
+	AgentDeviceID      string
+	ServerURL          string
 }
 
 // GenerateX25519Keypair creates a new ephemeral X25519 keypair for pairing.
@@ -77,19 +79,15 @@ func (kp *X25519Keypair) ComputeSharedSecret(peerPubKeyBase64 string) (string, e
 	return base64.StdEncoding.EncodeToString(secret), nil
 }
 
-// BuildQRPayload creates the JSON payload for the pairing QR code.
+// BuildQRPayload creates a pipe-delimited payload for the pairing QR code.
+// Format: pairingCode|x25519PubKey|deviceId[|serverUrl]
+// The server URL is omitted when it matches the production default to minimize
+// QR code size. The mobile app falls back to the default when absent.
 func BuildQRPayload(pairingCode string, x25519PubKeyBase64 string, agentDeviceID string, serverURL string) (string, error) {
-	payload := QRPayload{
-		PairingCode:       pairingCode,
-		AgentX25519PubKey: x25519PubKeyBase64,
-		AgentDeviceID:     agentDeviceID,
-		ServerURL:         serverURL,
+	if serverURL == config.DefaultServerURL {
+		return pairingCode + "|" + x25519PubKeyBase64 + "|" + agentDeviceID, nil
 	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal QR payload: %w", err)
-	}
-	return string(data), nil
+	return pairingCode + "|" + x25519PubKeyBase64 + "|" + agentDeviceID + "|" + serverURL, nil
 }
 
 // LoadPairedDevices reads the paired devices list from disk.

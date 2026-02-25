@@ -93,8 +93,7 @@ func Run(ctx context.Context, paths config.Paths) error {
 	// Create tmux client targeting the pmux socket
 	tmuxClient := tmux.NewClient(tmux.DefaultSocket)
 
-	// TODO: read server URL from config file
-	serverURL := config.DefaultServerURL
+	serverURL := config.ServerURL()
 
 	// Create components with forward references (resolved via closures)
 	var peerManager *webrtc.PeerManager
