@@ -56,6 +56,9 @@ func TestTitleFilter(t *testing.T) {
 		{"consecutive ESCs before title",
 			[][]byte{[]byte("\x1b\x1bktitle\x1b\\")},
 			[][]byte{[]byte("\x1b")}},
+		{"ESC ESC backslash terminates title",
+			[][]byte{[]byte("\x1bkfoo\x1b\x1b\\after")},
+			[][]byte{[]byte("after")}},
 
 		// --- Safety valve ---
 		{"safety valve flushes on oversized title",

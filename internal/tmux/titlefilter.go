@@ -100,9 +100,14 @@ func (f *TitleFilter) Filter(data []byte) []byte {
 			b := data[i]
 			i++
 			if b == '\\' {
-				// ESC \ (ST) — end of title. Discard titleBuf.
+				// ESC \ (ST) ��� end of title. Discard titleBuf.
 				f.titleBuf = f.titleBuf[:0]
 				f.state = tfPassthrough
+			} else if b == 0x1b {
+				// Another ESC — the previous ESC was content in the title,
+				// this new ESC might be the start of ST.
+				f.titleBuf = append(f.titleBuf, b)
+				// stay in tfSawEscInTitle
 			} else {
 				// Not ST — keep buffering
 				f.titleBuf = append(f.titleBuf, b)
