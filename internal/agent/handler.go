@@ -84,8 +84,6 @@ func (h *Handler) HandleMessage(peerID string, msg protocol.Message) {
 		h.handleResize(peerID, m)
 	case *protocol.PingRequest:
 		h.handlePing(peerID)
-	case *protocol.CreateSessionRequest:
-		h.handleCreateSession(peerID, m)
 	case *protocol.KillSessionRequest:
 		h.handleKillSession(peerID, m)
 	default:
@@ -225,29 +223,6 @@ func (h *Handler) handlePing(peerID string) {
 	h.sendMsg(peerID, &protocol.PongEvent{
 		Type:    "pong",
 		Latency: 0,
-	})
-}
-
-func (h *Handler) handleCreateSession(peerID string, req *protocol.CreateSessionRequest) {
-	name := ""
-	if req.Name != nil {
-		name = *req.Name
-	}
-	command := ""
-	if req.Command != nil {
-		command = *req.Command
-	}
-
-	sessionID, err := h.tmux.CreateSession(name, command)
-	if err != nil {
-		h.sendError(peerID, "create_session_failed", err.Error())
-		return
-	}
-
-	h.sendMsg(peerID, &protocol.SessionCreatedEvent{
-		Type:    "session_created",
-		Session: sessionID,
-		Name:    name,
 	})
 }
 

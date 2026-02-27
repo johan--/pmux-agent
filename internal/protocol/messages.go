@@ -52,15 +52,6 @@ type ResizeRequest struct {
 
 func (m *ResizeRequest) MessageType() string { return "resize" }
 
-// CreateSessionRequest creates a new tmux session.
-type CreateSessionRequest struct {
-	Type    string  `msgpack:"type"`
-	Name    *string `msgpack:"name,omitempty"`
-	Command *string `msgpack:"command,omitempty"`
-}
-
-func (m *CreateSessionRequest) MessageType() string { return "create_session" }
-
 // KillSessionRequest kills a tmux session by ID.
 type KillSessionRequest struct {
 	Type    string `msgpack:"type"`
@@ -108,15 +99,6 @@ type DetachedEvent struct {
 }
 
 func (m *DetachedEvent) MessageType() string { return "detached" }
-
-// SessionCreatedEvent confirms a new session was created.
-type SessionCreatedEvent struct {
-	Type    string `msgpack:"type"`
-	Session string `msgpack:"session"`
-	Name    string `msgpack:"name"`
-}
-
-func (m *SessionCreatedEvent) MessageType() string { return "session_created" }
 
 // SessionEndedEvent reports a session was killed or exited.
 type SessionEndedEvent struct {

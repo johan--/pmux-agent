@@ -109,52 +109,6 @@ func TestRoundTripResize(t *testing.T) {
 	}
 }
 
-func TestRoundTripCreateSession(t *testing.T) {
-	name := "work"
-	command := "bash"
-	msg := &CreateSessionRequest{Type: "create_session", Name: &name, Command: &command}
-	data, err := Encode(msg)
-	if err != nil {
-		t.Fatalf("encode: %v", err)
-	}
-	decoded, err := Decode(data)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	got, ok := decoded.(*CreateSessionRequest)
-	if !ok {
-		t.Fatalf("expected *CreateSessionRequest, got %T", decoded)
-	}
-	if got.Name == nil || *got.Name != "work" {
-		t.Errorf("name = %v, want 'work'", got.Name)
-	}
-	if got.Command == nil || *got.Command != "bash" {
-		t.Errorf("command = %v, want 'bash'", got.Command)
-	}
-}
-
-func TestRoundTripCreateSessionMinimal(t *testing.T) {
-	msg := &CreateSessionRequest{Type: "create_session"}
-	data, err := Encode(msg)
-	if err != nil {
-		t.Fatalf("encode: %v", err)
-	}
-	decoded, err := Decode(data)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	got, ok := decoded.(*CreateSessionRequest)
-	if !ok {
-		t.Fatalf("expected *CreateSessionRequest, got %T", decoded)
-	}
-	if got.Name != nil {
-		t.Errorf("name = %v, want nil", got.Name)
-	}
-	if got.Command != nil {
-		t.Errorf("command = %v, want nil", got.Command)
-	}
-}
-
 func TestRoundTripKillSession(t *testing.T) {
 	msg := &KillSessionRequest{Type: "kill_session", Session: "$2"}
 	data, err := Encode(msg)
@@ -335,25 +289,6 @@ func TestRoundTripDetached(t *testing.T) {
 	}
 }
 
-func TestRoundTripSessionCreated(t *testing.T) {
-	msg := &SessionCreatedEvent{Type: "session_created", Session: "$3", Name: "deploy"}
-	data, err := Encode(msg)
-	if err != nil {
-		t.Fatalf("encode: %v", err)
-	}
-	decoded, err := Decode(data)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	got, ok := decoded.(*SessionCreatedEvent)
-	if !ok {
-		t.Fatalf("expected *SessionCreatedEvent, got %T", decoded)
-	}
-	if got.Session != "$3" || got.Name != "deploy" {
-		t.Errorf("got %+v", got)
-	}
-}
-
 func TestRoundTripSessionEnded(t *testing.T) {
 	msg := &SessionEndedEvent{Type: "session_ended", Session: "$3"}
 	data, err := Encode(msg)
@@ -483,7 +418,6 @@ func TestIsRequest(t *testing.T) {
 		&DetachRequest{Type: "detach"},
 		&InputRequest{Type: "input"},
 		&ResizeRequest{Type: "resize"},
-		&CreateSessionRequest{Type: "create_session"},
 		&KillSessionRequest{Type: "kill_session"},
 		&PingRequest{Type: "ping"},
 	}
@@ -503,7 +437,6 @@ func TestIsEvent(t *testing.T) {
 		&OutputEvent{Type: "output"},
 		&AttachedEvent{Type: "attached"},
 		&DetachedEvent{Type: "detached"},
-		&SessionCreatedEvent{Type: "session_created"},
 		&SessionEndedEvent{Type: "session_ended"},
 		&ErrorEvent{Type: "error"},
 		&PongEvent{Type: "pong"},
@@ -660,22 +593,6 @@ func verifyFixtureFields(t *testing.T, msg Message, expected fixtureJSON) {
 			t.Errorf("rows = %d, want %d", m.Rows, *expected.Rows)
 		}
 
-	case *CreateSessionRequest:
-		if expected.Name != nil {
-			if m.Name == nil || *m.Name != *expected.Name {
-				t.Errorf("name = %v, want %q", m.Name, *expected.Name)
-			}
-		} else if m.Name != nil {
-			t.Errorf("name = %v, want nil", m.Name)
-		}
-		if expected.Command != nil {
-			if m.Command == nil || *m.Command != *expected.Command {
-				t.Errorf("command = %v, want %q", m.Command, *expected.Command)
-			}
-		} else if m.Command != nil {
-			t.Errorf("command = %v, want nil", m.Command)
-		}
-
 	case *KillSessionRequest:
 		if m.Session != expected.Session {
 			t.Errorf("session = %q, want %q", m.Session, expected.Session)
@@ -693,14 +610,6 @@ func verifyFixtureFields(t *testing.T, msg Message, expected fixtureJSON) {
 	case *AttachedEvent:
 		if m.PaneID != expected.PaneID {
 			t.Errorf("paneId = %q, want %q", m.PaneID, expected.PaneID)
-		}
-
-	case *SessionCreatedEvent:
-		if m.Session != expected.Session {
-			t.Errorf("session = %q, want %q", m.Session, expected.Session)
-		}
-		if expected.Name != nil && m.Name != *expected.Name {
-			t.Errorf("name = %q, want %q", m.Name, *expected.Name)
 		}
 
 	case *SessionEndedEvent:

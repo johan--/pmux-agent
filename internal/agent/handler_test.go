@@ -314,49 +314,6 @@ func TestHandler_Ping(t *testing.T) {
 	}
 }
 
-func TestHandler_CreateSession(t *testing.T) {
-	h, tc, catcher := testHandler(t)
-
-	// Create an initial session so tmux server is running
-	_, err := tc.CreateSession("existing", "")
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	name := "mobile-created"
-	h.HandleMessage("peer1", &protocol.CreateSessionRequest{
-		Type: "create_session",
-		Name: &name,
-	})
-
-	msgs := catcher.get()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
-	}
-	created, ok := msgs[0].Msg.(*protocol.SessionCreatedEvent)
-	if !ok {
-		t.Fatalf("expected SessionCreatedEvent, got %T", msgs[0].Msg)
-	}
-	if created.Name != "mobile-created" {
-		t.Errorf("name = %q, want mobile-created", created.Name)
-	}
-	if created.Session == "" {
-		t.Error("session ID should not be empty")
-	}
-
-	// Verify session exists
-	sessions, _ := tc.ListSessions()
-	found := false
-	for _, s := range sessions {
-		if s.Name == "mobile-created" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("created session not found via ListSessions")
-	}
-}
-
 func TestHandler_KillSession(t *testing.T) {
 	h, tc, catcher := testHandler(t)
 

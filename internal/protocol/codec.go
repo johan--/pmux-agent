@@ -45,8 +45,6 @@ func Decode(data []byte) (Message, error) {
 		msg = &InputRequest{}
 	case "resize":
 		msg = &ResizeRequest{}
-	case "create_session":
-		msg = &CreateSessionRequest{}
 	case "kill_session":
 		msg = &KillSessionRequest{}
 	case "ping":
@@ -61,8 +59,6 @@ func Decode(data []byte) (Message, error) {
 		msg = &AttachedEvent{}
 	case "detached":
 		msg = &DetachedEvent{}
-	case "session_created":
-		msg = &SessionCreatedEvent{}
 	case "session_ended":
 		msg = &SessionEndedEvent{}
 	case "error":
@@ -85,7 +81,7 @@ func Decode(data []byte) (Message, error) {
 func IsRequest(msg Message) bool {
 	switch msg.(type) {
 	case *ListSessionsRequest, *AttachRequest, *DetachRequest,
-		*InputRequest, *ResizeRequest, *CreateSessionRequest,
+		*InputRequest, *ResizeRequest,
 		*KillSessionRequest, *PingRequest:
 		return true
 	}
@@ -96,7 +92,7 @@ func IsRequest(msg Message) bool {
 func IsEvent(msg Message) bool {
 	switch msg.(type) {
 	case *SessionsEvent, *OutputEvent, *AttachedEvent, *DetachedEvent,
-		*SessionCreatedEvent, *SessionEndedEvent, *ErrorEvent, *PongEvent:
+		*SessionEndedEvent, *ErrorEvent, *PongEvent:
 		return true
 	}
 	return false
