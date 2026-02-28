@@ -515,6 +515,9 @@ func TestCrossLanguageFixtures(t *testing.T) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("fixtures dir not found (standalone checkout?): %s", dir)
+		}
 		t.Fatalf("read fixtures dir %s: %v", dir, err)
 	}
 
