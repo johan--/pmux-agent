@@ -215,3 +215,182 @@ func TestGetStalePeers_EmptyMap(t *testing.T) {
 		t.Errorf("expected 0 stale peers, got %d", len(stale))
 	}
 }
+
+// --- PeerStateChecker safety-net tests ---
+
+// mockStateChecker returns peer states for testing. Thread-safe so it can
+// be mutated (e.g., removing entries to simulate ClosePeer) while the
+// cleaner goroutine reads it.
+type mockStateChecker struct {
+	mu     sync.Mutex
+	states map[string]string
+}
+
+func (m *mockStateChecker) PeerStates() map[string]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make(map[string]string, len(m.states))
+	for k, v := range m.states {
+		cp[k] = v
+	}
+	return cp
+}
+
+func (m *mockStateChecker) remove(deviceID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.states, deviceID)
+}
+
+func TestConnectionCleaner_SweepClosesFailedPCState(t *testing.T) {
+	h := testCleanupHandler()
+	closer := &mockPeerCloser{}
+	checker := &mockStateChecker{
+		states: map[string]string{
+			"failed-peer": "failed",
+			"closed-peer": "closed",
+		},
+	}
+
+	cleaner := NewConnectionCleaner(h, closer, slog.Default()).
+		WithInterval(50 * time.Millisecond).
+		WithTimeout(60 * time.Second).
+		WithStateChecker(checker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go cleaner.Run(ctx)
+
+	// Wait for at least one sweep
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	closed := closer.getClosedPeers()
+	closedSet := make(map[string]bool)
+	for _, p := range closed {
+		closedSet[p] = true
+	}
+
+	if !closedSet["failed-peer"] {
+		t.Error("expected failed-peer to be closed by safety-net sweep")
+	}
+	if !closedSet["closed-peer"] {
+		t.Error("expected closed-peer to be closed by safety-net sweep")
+	}
+}
+
+func TestConnectionCleaner_SweepIgnoresConnectedPCState(t *testing.T) {
+	h := testCleanupHandler()
+	closer := &mockPeerCloser{}
+	checker := &mockStateChecker{
+		states: map[string]string{
+			"connected-peer":    "connected",
+			"new-peer":          "new",
+			"disconnected-peer": "disconnected",
+		},
+	}
+
+	cleaner := NewConnectionCleaner(h, closer, slog.Default()).
+		WithInterval(50 * time.Millisecond).
+		WithTimeout(60 * time.Second).
+		WithStateChecker(checker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go cleaner.Run(ctx)
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	closed := closer.getClosedPeers()
+	if len(closed) != 0 {
+		t.Errorf("expected no peers closed for connected/new/disconnected states, got %v", closed)
+	}
+}
+
+func TestConnectionCleaner_SweepNoDoubleClose(t *testing.T) {
+	h := testCleanupHandler()
+
+	checker := &mockStateChecker{
+		states: map[string]string{
+			"stale-and-failed": "failed",
+		},
+	}
+
+	// Use a closer that removes the peer from the state checker when closed,
+	// simulating real PeerManager behavior where ClosePeer removes the peer.
+	closer := &mockPeerCloserWithStateCleanup{
+		mockPeerCloser: mockPeerCloser{},
+		checker:        checker,
+	}
+
+	// Peer is both stale (idle timeout) AND has failed PC state.
+	// Within a single sweep it should only be closed once (by idle check,
+	// since it runs first). The state checker removal prevents subsequent
+	// sweeps from double-closing.
+	h.mu.Lock()
+	h.lastPingTime["stale-and-failed"] = time.Now().Add(-90 * time.Second)
+	h.mu.Unlock()
+
+	cleaner := NewConnectionCleaner(h, closer, slog.Default()).
+		WithInterval(50 * time.Millisecond).
+		WithTimeout(60 * time.Second).
+		WithStateChecker(checker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go cleaner.Run(ctx)
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	closed := closer.getClosedPeers()
+	// Count how many times stale-and-failed was closed
+	count := 0
+	for _, p := range closed {
+		if p == "stale-and-failed" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected stale-and-failed to be closed exactly once, got %d times", count)
+	}
+}
+
+// mockPeerCloserWithStateCleanup wraps mockPeerCloser and removes peers from
+// the state checker when closed, simulating real PeerManager behavior.
+type mockPeerCloserWithStateCleanup struct {
+	mockPeerCloser
+	checker *mockStateChecker
+}
+
+func (m *mockPeerCloserWithStateCleanup) ClosePeer(deviceID string) {
+	m.mockPeerCloser.ClosePeer(deviceID)
+	m.checker.remove(deviceID)
+}
+
+func TestConnectionCleaner_WithoutStateChecker(t *testing.T) {
+	h := testCleanupHandler()
+	closer := &mockPeerCloser{}
+
+	// No stale peers, no state checker — should close nothing.
+	cleaner := NewConnectionCleaner(h, closer, slog.Default()).
+		WithInterval(50 * time.Millisecond).
+		WithTimeout(60 * time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go cleaner.Run(ctx)
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	closed := closer.getClosedPeers()
+	if len(closed) != 0 {
+		t.Errorf("expected no peers closed without state checker, got %v", closed)
+	}
+}

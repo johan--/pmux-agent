@@ -20,16 +20,28 @@ type PeerCloser interface {
 	ClosePeer(deviceID string)
 }
 
+// PeerStateChecker provides PeerConnection state information for safety-net
+// cleanup. The ConnectionCleaner uses this to detect peers stuck in failed
+// or closed state that weren't cleaned up by the primary state handlers.
+type PeerStateChecker interface {
+	PeerStates() map[string]string
+}
+
 // ConnectionCleaner periodically scans for idle peers and closes them.
 // A peer is considered idle if it has not sent a ping within the configured
 // timeout (default: 60s). The cleaner runs a goroutine that ticks at the
 // configured interval (default: 30s).
+//
+// When a PeerStateChecker is configured (via WithStateChecker), the cleaner
+// also closes peers whose PeerConnection is in "failed" or "closed" state
+// as a safety net for the primary state change handlers.
 type ConnectionCleaner struct {
-	handler   *Handler
-	closer    PeerCloser
-	interval  time.Duration
-	timeout   time.Duration
-	logger    *slog.Logger
+	handler      *Handler
+	closer       PeerCloser
+	stateChecker PeerStateChecker
+	interval     time.Duration
+	timeout      time.Duration
+	logger       *slog.Logger
 }
 
 // NewConnectionCleaner creates a ConnectionCleaner with default timing.
@@ -55,6 +67,14 @@ func (cc *ConnectionCleaner) WithTimeout(d time.Duration) *ConnectionCleaner {
 	return cc
 }
 
+// WithStateChecker sets a PeerStateChecker for safety-net cleanup.
+// When set, sweep() also closes peers whose PeerConnection is in
+// "failed" or "closed" state.
+func (cc *ConnectionCleaner) WithStateChecker(sc PeerStateChecker) *ConnectionCleaner {
+	cc.stateChecker = sc
+	return cc
+}
+
 // Run starts the cleanup loop. Blocks until the context is canceled.
 func (cc *ConnectionCleaner) Run(ctx context.Context) {
 	ticker := time.NewTicker(cc.interval)
@@ -74,12 +94,38 @@ func (cc *ConnectionCleaner) Run(ctx context.Context) {
 	}
 }
 
-// sweep checks for stale peers and closes them.
+// sweep checks for stale peers and closes them. When a PeerStateChecker
+// is configured, it also closes peers whose PeerConnection is in "failed"
+// or "closed" state as a safety net.
 func (cc *ConnectionCleaner) sweep() {
+	// Close peers that haven't pinged within the timeout.
 	stale := cc.handler.GetStalePeers(cc.timeout)
 	for _, peerID := range stale {
 		cc.logger.Info("closing idle peer", "peer", peerID, "timeout", cc.timeout)
 		cc.handler.PeerDisconnected(peerID)
 		cc.closer.ClosePeer(peerID)
+	}
+
+	// Safety net: close peers with dead PeerConnection state.
+	// The primary state change handlers (handlePeerStateChange) should handle
+	// these transitions, but this catches any that slip through.
+	if cc.stateChecker != nil {
+		// Build a set of already-closed peers to avoid double-closing.
+		closedSet := make(map[string]bool, len(stale))
+		for _, peerID := range stale {
+			closedSet[peerID] = true
+		}
+
+		for peerID, state := range cc.stateChecker.PeerStates() {
+			if closedSet[peerID] {
+				continue
+			}
+			if state == "failed" || state == "closed" {
+				cc.logger.Info("closing peer with dead PC state (safety net)",
+					"peer", peerID, "pcState", state)
+				cc.handler.PeerDisconnected(peerID)
+				cc.closer.ClosePeer(peerID)
+			}
+		}
 	}
 }

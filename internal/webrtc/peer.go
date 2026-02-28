@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 
@@ -27,6 +28,11 @@ const maxMessageSize = 4096
 // fires the OnBufferedAmountLow callback, enabling backpressure-aware sending.
 const bufferedAmountLowThreshold = 4096
 
+// pcDisconnectedTimeout is how long to wait after a PeerConnection enters
+// the "disconnected" state before attempting an ICE restart. This grace period
+// allows transient network interruptions to recover without intervention.
+const pcDisconnectedTimeout = 10 * time.Second
+
 // TurnCredentials holds STUN/TURN server credentials from the signaling server.
 type TurnCredentials struct {
 	URLs       []string `json:"urls"`
@@ -41,6 +47,10 @@ type MessageSender interface {
 
 // ProtocolHandler is called when a decoded protocol message arrives on the DataChannel.
 type ProtocolHandler func(peerID string, msg protocol.Message)
+
+// PeerStateHandler is called when a peer connection's state changes.
+// The handler receives the device ID and the new connection state.
+type PeerStateHandler func(deviceID string, state webrtc.PeerConnectionState)
 
 // PeerManager manages multiple WebRTC peer connections, one per mobile device.
 type PeerManager struct {
@@ -62,32 +72,35 @@ type PeerManager struct {
 	// When set, only this device is allowed to connect; others are rejected.
 	AllowedDeviceID string
 
-	mu    sync.Mutex
-	peers map[string]*Peer // keyed by mobile device ID
+	mu               sync.Mutex
+	peers            map[string]*Peer          // keyed by mobile device ID
+	disconnectTimers map[string]*time.Timer    // grace timers for disconnected peers
 }
 
 // Peer represents a single WebRTC peer connection to a mobile device.
 type Peer struct {
-	DeviceID   string
-	conn       *webrtc.PeerConnection
-	dc         *webrtc.DataChannel
-	logger     *slog.Logger
-	signaling  MessageSender
-	handler    ProtocolHandler
-	mu         sync.Mutex
-	closed     bool
+	DeviceID     string
+	conn         *webrtc.PeerConnection
+	dc           *webrtc.DataChannel
+	logger       *slog.Logger
+	signaling    MessageSender
+	handler      ProtocolHandler
+	stateHandler PeerStateHandler
+	mu           sync.Mutex
+	closed       bool
 }
 
 // NewPeerManager creates a manager for WebRTC peer connections.
 func NewPeerManager(logger *slog.Logger, signaling MessageSender, serverURL string, jwtFn func() string, handler ProtocolHandler) *PeerManager {
 	return &PeerManager{
-		logger:    logger,
-		signaling: signaling,
-		serverURL: strings.TrimRight(serverURL, "/"),
-		jwt:       jwtFn,
-		handler:   handler,
-		MaxPeers:  1,
-		peers:     make(map[string]*Peer),
+		logger:           logger,
+		signaling:        signaling,
+		serverURL:        strings.TrimRight(serverURL, "/"),
+		jwt:              jwtFn,
+		handler:          handler,
+		MaxPeers:         1,
+		peers:            make(map[string]*Peer),
+		disconnectTimers: make(map[string]*time.Timer),
 	}
 }
 
@@ -112,6 +125,11 @@ func (pm *PeerManager) ClosePeer(deviceID string) {
 	if ok {
 		delete(pm.peers, deviceID)
 	}
+	// Cancel any pending disconnect timer for this peer.
+	if timer, hasTimer := pm.disconnectTimers[deviceID]; hasTimer {
+		timer.Stop()
+		delete(pm.disconnectTimers, deviceID)
+	}
 	peerCount := len(pm.peers)
 	pm.mu.Unlock()
 
@@ -134,6 +152,12 @@ func (pm *PeerManager) CloseAll() {
 	}
 	closedCount := len(peers)
 	pm.peers = make(map[string]*Peer)
+
+	// Cancel all pending disconnect timers.
+	for deviceID, timer := range pm.disconnectTimers {
+		timer.Stop()
+		delete(pm.disconnectTimers, deviceID)
+	}
 	pm.mu.Unlock()
 
 	for _, p := range peers {
@@ -153,6 +177,20 @@ func (pm *PeerManager) PeerCount() int {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	return len(pm.peers)
+}
+
+// PeerStates returns a map of device ID to PeerConnection state string
+// for all tracked peers. Used by ConnectionCleaner as a safety net to detect
+// peers in failed/closed state that weren't cleaned up by state handlers.
+func (pm *PeerManager) PeerStates() map[string]string {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	states := make(map[string]string, len(pm.peers))
+	for deviceID, peer := range pm.peers {
+		states[deviceID] = peer.conn.ConnectionState().String()
+	}
+	return states
 }
 
 // BroadcastRaw sends raw bytes to all connected peers' DataChannels.
@@ -255,11 +293,12 @@ func (pm *PeerManager) handleConnectRequest(mobileDeviceID string) {
 	}
 
 	peer := &Peer{
-		DeviceID:  mobileDeviceID,
-		conn:      pc,
-		logger:    pm.logger.With("peer", mobileDeviceID),
-		signaling: pm.signaling,
-		handler:   pm.handler,
+		DeviceID:     mobileDeviceID,
+		conn:         pc,
+		logger:       pm.logger.With("peer", mobileDeviceID),
+		signaling:    pm.signaling,
+		handler:      pm.handler,
+		stateHandler: pm.handlePeerStateChange,
 	}
 
 	pm.mu.Lock()
@@ -416,6 +455,112 @@ func (pm *PeerManager) fetchTurnCredentials() ([]webrtc.ICEServer, error) {
 	}, nil
 }
 
+// handlePeerStateChange is the PeerStateHandler callback for managing disconnect
+// timers, ICE restarts, and peer cleanup based on PeerConnection state transitions.
+func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerConnectionState) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	switch state {
+	case webrtc.PeerConnectionStateConnected:
+		// Connection recovered — cancel any pending disconnect timer.
+		if timer, ok := pm.disconnectTimers[deviceID]; ok {
+			timer.Stop()
+			delete(pm.disconnectTimers, deviceID)
+			pm.logger.Info("disconnect timer cancelled (connection recovered)", "mobile", deviceID)
+		}
+
+	case webrtc.PeerConnectionStateDisconnected:
+		// Start a grace timer. If the connection doesn't recover within
+		// pcDisconnectedTimeout, attempt an ICE restart.
+		if _, ok := pm.disconnectTimers[deviceID]; ok {
+			// Timer already running — don't restart it.
+			return
+		}
+		pm.logger.Info("peer disconnected, starting grace timer",
+			"mobile", deviceID, "timeout", pcDisconnectedTimeout)
+		pm.disconnectTimers[deviceID] = time.AfterFunc(pcDisconnectedTimeout, func() {
+			pm.onDisconnectTimerFired(deviceID)
+		})
+
+	case webrtc.PeerConnectionStateFailed:
+		// Connection unrecoverable — cancel timer and close peer immediately.
+		if timer, ok := pm.disconnectTimers[deviceID]; ok {
+			timer.Stop()
+			delete(pm.disconnectTimers, deviceID)
+		}
+		pm.logger.Info("peer connection failed, closing peer", "mobile", deviceID)
+		go pm.ClosePeer(deviceID)
+
+	case webrtc.PeerConnectionStateClosed:
+		// Peer already closed — cancel any lingering timer.
+		if timer, ok := pm.disconnectTimers[deviceID]; ok {
+			timer.Stop()
+			delete(pm.disconnectTimers, deviceID)
+		}
+	}
+}
+
+// onDisconnectTimerFired is called when the disconnect grace timer expires.
+// It checks whether the peer is still disconnected and attempts an ICE restart.
+func (pm *PeerManager) onDisconnectTimerFired(deviceID string) {
+	pm.mu.Lock()
+	delete(pm.disconnectTimers, deviceID)
+	peer, ok := pm.peers[deviceID]
+	pm.mu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	// Only attempt ICE restart if the peer is still in the disconnected state.
+	if peer.conn.ConnectionState() != webrtc.PeerConnectionStateDisconnected {
+		pm.logger.Debug("disconnect timer fired but peer recovered", "mobile", deviceID)
+		return
+	}
+
+	pm.logger.Info("disconnect timer fired, attempting ICE restart", "mobile", deviceID)
+	pm.attemptICERestart(deviceID)
+}
+
+// attemptICERestart creates a new SDP offer with the ICE restart flag and sends
+// it to the mobile via signaling. If any step fails, the peer is closed and the
+// mobile will need to perform a full reconnect.
+func (pm *PeerManager) attemptICERestart(deviceID string) {
+	pm.mu.Lock()
+	peer, ok := pm.peers[deviceID]
+	pm.mu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	offer, err := peer.conn.CreateOffer(&webrtc.OfferOptions{ICERestart: true})
+	if err != nil {
+		pm.logger.Error("ICE restart: failed to create offer", "error", err, "mobile", deviceID)
+		go pm.ClosePeer(deviceID)
+		return
+	}
+
+	if err := peer.conn.SetLocalDescription(offer); err != nil {
+		pm.logger.Error("ICE restart: failed to set local description", "error", err, "mobile", deviceID)
+		go pm.ClosePeer(deviceID)
+		return
+	}
+
+	if err := pm.signaling.Send(SignalingMessage{
+		Type:           "sdp_offer",
+		TargetDeviceID: deviceID,
+		SDP:            offer.SDP,
+	}); err != nil {
+		pm.logger.Error("ICE restart: failed to send SDP offer", "error", err, "mobile", deviceID)
+		go pm.ClosePeer(deviceID)
+		return
+	}
+
+	pm.logger.Info("ICE restart offer sent", "mobile", deviceID)
+}
+
 // --- Peer methods ---
 //
 // Security: DataChannel messages contain only terminal protocol data (session lists,
@@ -468,6 +613,12 @@ func (p *Peer) setupHandlers() {
 			state == webrtc.PeerConnectionStateClosed ||
 			state == webrtc.PeerConnectionStateDisconnected {
 			p.logger.Info("peer connection ended", "state", state.String())
+		}
+
+		// Notify the PeerManager of state changes for disconnect timer
+		// management and ICE restart logic.
+		if p.stateHandler != nil {
+			p.stateHandler(p.DeviceID, state)
 		}
 	})
 }

@@ -783,6 +783,308 @@ func TestPeerManager_DTLSNotDisabled(t *testing.T) {
 	pm.CloseAll()
 }
 
+// --- PeerConnection state handling + ICE restart tests ---
+
+func TestPeerManager_DisconnectedStartsGraceTimer(t *testing.T) {
+	sender := &mockSender{}
+	logger := testLogger()
+
+	pm := NewPeerManager(logger, sender, "http://localhost:1", func() string { return "jwt" }, nil)
+	pm.API = fastAPI(t)
+
+	// Create a peer via connect_request
+	pm.HandleSignalingMessage(SignalingMessage{Type: "connect_request", TargetDeviceID: "mobile-disc"})
+	time.Sleep(500 * time.Millisecond)
+
+	if pm.PeerCount() != 1 {
+		t.Fatalf("expected 1 peer, got %d", pm.PeerCount())
+	}
+
+	// Simulate PeerConnectionStateDisconnected
+	pm.handlePeerStateChange("mobile-disc", webrtc.PeerConnectionStateDisconnected)
+
+	pm.mu.Lock()
+	_, hasTimer := pm.disconnectTimers["mobile-disc"]
+	pm.mu.Unlock()
+
+	if !hasTimer {
+		t.Error("expected disconnect timer to be started for disconnected peer")
+	}
+
+	pm.CloseAll()
+}
+
+func TestPeerManager_ConnectedDuringGraceCancelsTimer(t *testing.T) {
+	sender := &mockSender{}
+	logger := testLogger()
+
+	pm := NewPeerManager(logger, sender, "http://localhost:1", func() string { return "jwt" }, nil)
+	pm.API = fastAPI(t)
+
+	pm.HandleSignalingMessage(SignalingMessage{Type: "connect_request", TargetDeviceID: "mobile-recover"})
+	time.Sleep(500 * time.Millisecond)
+
+	// Simulate disconnected → timer starts
+	pm.handlePeerStateChange("mobile-recover", webrtc.PeerConnectionStateDisconnected)
+
+	pm.mu.Lock()
+	_, hasTimer := pm.disconnectTimers["mobile-recover"]
+	pm.mu.Unlock()
+	if !hasTimer {
+		t.Fatal("expected disconnect timer to be started")
+	}
+
+	// Simulate connected → timer should be cancelled
+	pm.handlePeerStateChange("mobile-recover", webrtc.PeerConnectionStateConnected)
+
+	pm.mu.Lock()
+	_, hasTimerAfter := pm.disconnectTimers["mobile-recover"]
+	pm.mu.Unlock()
+	if hasTimerAfter {
+		t.Error("expected disconnect timer to be cancelled when connection recovered")
+	}
+
+	// Peer should still be alive
+	if pm.PeerCount() != 1 {
+		t.Errorf("expected 1 peer after recovery, got %d", pm.PeerCount())
+	}
+
+	pm.CloseAll()
+}
+
+func TestPeerManager_FailedClosesPeerImmediately(t *testing.T) {
+	sender := &mockSender{}
+	logger := testLogger()
+
+	pm := NewPeerManager(logger, sender, "http://localhost:1", func() string { return "jwt" }, nil)
+	pm.API = fastAPI(t)
+
+	pm.HandleSignalingMessage(SignalingMessage{Type: "connect_request", TargetDeviceID: "mobile-fail"})
+	time.Sleep(500 * time.Millisecond)
+
+	if pm.PeerCount() != 1 {
+		t.Fatalf("expected 1 peer, got %d", pm.PeerCount())
+	}
+
+	// Simulate failed state → peer should be closed via goroutine
+	pm.handlePeerStateChange("mobile-fail", webrtc.PeerConnectionStateFailed)
+
+	// Give the goroutine time to run ClosePeer
+	time.Sleep(200 * time.Millisecond)
+
+	if pm.PeerCount() != 0 {
+		t.Errorf("expected 0 peers after failed state, got %d", pm.PeerCount())
+	}
+}
+
+func TestPeerManager_DisconnectTimerFiresICERestart(t *testing.T) {
+	sender := &mockSender{}
+	logger := testLogger()
+
+	pm := NewPeerManager(logger, sender, "http://localhost:1", func() string { return "jwt" }, nil)
+	pm.API = fastAPI(t)
+
+	pm.HandleSignalingMessage(SignalingMessage{Type: "connect_request", TargetDeviceID: "mobile-ice"})
+	time.Sleep(500 * time.Millisecond)
+
+	// Count existing sdp_offer messages (from initial connect)
+	initialOffers := len(sender.messagesOfType("sdp_offer"))
+
+	// Directly call onDisconnectTimerFired — this simulates the timer expiring
+	// while the peer is still in a state where ICE restart can be attempted.
+	// Note: In a real scenario, the PC would be in "disconnected" state, but
+	// since we can't easily force that in a unit test with Pion, we just verify
+	// that the method attempts to create a new offer. If the PC has moved past
+	// disconnected (e.g. to "new" in test), the method exits early as expected.
+	pm.onDisconnectTimerFired("mobile-ice")
+
+	// The timer should be removed from disconnectTimers
+	pm.mu.Lock()
+	_, hasTimer := pm.disconnectTimers["mobile-ice"]
+	pm.mu.Unlock()
+	if hasTimer {
+		t.Error("disconnect timer should be cleaned up after firing")
+	}
+
+	// The peer may or may not have gotten an ICE restart offer depending on
+	// its actual connection state in the test environment. We primarily verify
+	// that the method runs without panicking and cleans up the timer.
+	_ = initialOffers
+
+	pm.CloseAll()
+}
+
+func TestPeerManager_ICERestartSendsOffer(t *testing.T) {
+	sender := &mockSender{}
+	logger := testLogger()
+
+	api := fastAPI(t)
+	pm := NewPeerManager(logger, sender, "http://localhost:1", func() string { return "jwt" }, nil)
+	pm.API = api
+
+	pm.HandleSignalingMessage(SignalingMessage{Type: "connect_request", TargetDeviceID: "mobile-iceoff"})
+	time.Sleep(500 * time.Millisecond)
+
+	offers := sender.messagesOfType("sdp_offer")
+	if len(offers) == 0 {
+		t.Fatal("no initial SDP offer sent")
+	}
+
+	// Complete the SDP exchange so the PC transitions out of have-local-offer.
+	// ICE restart requires the PC to be in stable state (remote desc set).
+	answerPC, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatalf("create answer PC: %v", err)
+	}
+	defer answerPC.Close()
+
+	offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offers[0].SDP}
+	if err := answerPC.SetRemoteDescription(offer); err != nil {
+		t.Fatalf("set remote desc: %v", err)
+	}
+
+	answer, err := answerPC.CreateAnswer(nil)
+	if err != nil {
+		t.Fatalf("create answer: %v", err)
+	}
+	if err := answerPC.SetLocalDescription(answer); err != nil {
+		t.Fatalf("set local desc: %v", err)
+	}
+
+	pm.HandleSignalingMessage(SignalingMessage{
+		Type:           "sdp_answer",
+		TargetDeviceID: "mobile-iceoff",
+		SDP:            answer.SDP,
+	})
+	time.Sleep(200 * time.Millisecond)
+
+	initialOfferCount := len(sender.messagesOfType("sdp_offer"))
+
+	// Call attemptICERestart directly — PC is now in stable state
+	pm.attemptICERestart("mobile-iceoff")
+	time.Sleep(200 * time.Millisecond)
+
+	afterOfferCount := len(sender.messagesOfType("sdp_offer"))
+	if afterOfferCount <= initialOfferCount {
+		t.Error("expected ICE restart to send a new SDP offer")
+	}
+
+	// Verify the restart offer has different SDP (new ice-ufrag/ice-pwd)
+	allOffers := sender.messagesOfType("sdp_offer")
+	if len(allOffers) < 2 {
+		t.Fatal("expected at least 2 SDP offers (initial + ICE restart)")
+	}
+
+	initialSDP := allOffers[0].SDP
+	restartSDP := allOffers[len(allOffers)-1].SDP
+	if initialSDP == restartSDP {
+		t.Error("ICE restart offer SDP should differ from initial offer SDP")
+	}
+
+	pm.CloseAll()
+}
+
+func TestPeerManager_CloseAllCancelsDisconnectTimers(t *testing.T) {
+	sender := &mockSender{}
+	logger := testLogger()
+
+	pm := NewPeerManager(logger, sender, "http://localhost:1", func() string { return "jwt" }, nil)
+	pm.API = fastAPI(t)
+
+	pm.HandleSignalingMessage(SignalingMessage{Type: "connect_request", TargetDeviceID: "mobile-t1"})
+	time.Sleep(500 * time.Millisecond)
+
+	// Start a disconnect timer
+	pm.handlePeerStateChange("mobile-t1", webrtc.PeerConnectionStateDisconnected)
+
+	pm.mu.Lock()
+	timerCount := len(pm.disconnectTimers)
+	pm.mu.Unlock()
+	if timerCount == 0 {
+		t.Fatal("expected at least 1 disconnect timer")
+	}
+
+	// CloseAll should cancel all timers
+	pm.CloseAll()
+
+	pm.mu.Lock()
+	timerCountAfter := len(pm.disconnectTimers)
+	pm.mu.Unlock()
+	if timerCountAfter != 0 {
+		t.Errorf("expected 0 disconnect timers after CloseAll, got %d", timerCountAfter)
+	}
+}
+
+func TestPeerManager_PeerStates(t *testing.T) {
+	sender := &mockSender{}
+	logger := testLogger()
+
+	pm := NewPeerManager(logger, sender, "http://localhost:1", func() string { return "jwt" }, nil)
+	pm.API = fastAPI(t)
+
+	// No peers — should return empty map
+	states := pm.PeerStates()
+	if len(states) != 0 {
+		t.Errorf("expected empty PeerStates, got %d", len(states))
+	}
+
+	// Add a peer
+	pm.HandleSignalingMessage(SignalingMessage{Type: "connect_request", TargetDeviceID: "mobile-ps"})
+	time.Sleep(500 * time.Millisecond)
+
+	states = pm.PeerStates()
+	if len(states) != 1 {
+		t.Fatalf("expected 1 state entry, got %d", len(states))
+	}
+
+	state, ok := states["mobile-ps"]
+	if !ok {
+		t.Fatal("expected state entry for mobile-ps")
+	}
+
+	// The state should be a valid PeerConnection state string (e.g., "new", "connecting", "connected")
+	validStates := map[string]bool{
+		"new": true, "connecting": true, "connected": true,
+		"disconnected": true, "failed": true, "closed": true,
+	}
+	if !validStates[state] {
+		t.Errorf("unexpected peer state %q", state)
+	}
+
+	pm.CloseAll()
+}
+
+func TestPeerManager_ClosePeerCancelsDisconnectTimer(t *testing.T) {
+	sender := &mockSender{}
+	logger := testLogger()
+
+	pm := NewPeerManager(logger, sender, "http://localhost:1", func() string { return "jwt" }, nil)
+	pm.API = fastAPI(t)
+
+	pm.HandleSignalingMessage(SignalingMessage{Type: "connect_request", TargetDeviceID: "mobile-cpt"})
+	time.Sleep(500 * time.Millisecond)
+
+	// Start a disconnect timer
+	pm.handlePeerStateChange("mobile-cpt", webrtc.PeerConnectionStateDisconnected)
+
+	pm.mu.Lock()
+	_, hasTimer := pm.disconnectTimers["mobile-cpt"]
+	pm.mu.Unlock()
+	if !hasTimer {
+		t.Fatal("expected disconnect timer to be started")
+	}
+
+	// ClosePeer should cancel the timer
+	pm.ClosePeer("mobile-cpt")
+
+	pm.mu.Lock()
+	_, hasTimerAfter := pm.disconnectTimers["mobile-cpt"]
+	pm.mu.Unlock()
+	if hasTimerAfter {
+		t.Error("expected disconnect timer to be cancelled by ClosePeer")
+	}
+}
+
 // TestBasicDataChannel verifies that two fastAPI peer connections can
 // establish a DataChannel using gathered-complete SDP exchange.
 func TestBasicDataChannel(t *testing.T) {

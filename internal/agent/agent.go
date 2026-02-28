@@ -166,8 +166,11 @@ func Run(ctx context.Context, paths config.Paths) error {
 	// Watch for tmux server lifecycle (tmux.Client satisfies serverChecker)
 	go watchTmux(ctx, cancel, tmuxClient, handler.BroadcastEmptySessions, defaultWatchConfig(), logger)
 
-	// Start connection cleaner to detect and close idle peers (no ping in 60s)
-	cleaner := NewConnectionCleaner(handler, peerManager, logger)
+	// Start connection cleaner to detect and close idle peers (no ping in 60s).
+	// WithStateChecker adds a safety-net sweep that also closes peers with
+	// failed/closed PeerConnection state.
+	cleaner := NewConnectionCleaner(handler, peerManager, logger).
+		WithStateChecker(peerManager)
 	go cleaner.Run(ctx)
 
 	// Run signaling client (blocks until context is canceled)
