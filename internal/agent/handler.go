@@ -134,12 +134,12 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 	// Detach from any existing pane first
 	h.detachPeer(peerID)
 
-	// Save original size and resize for mobile.
+	// Track attach and resize for mobile.
 	// On success, pass 0,0 to AttachPane so it skips its redundant resize.
 	// On failure, pass the real dimensions so AttachPane resizes as fallback.
 	attachCols, attachRows := req.Cols, req.Rows
-	if err := h.sizeTracker.SaveAndResize(req.PaneID, req.Cols, req.Rows); err != nil {
-		h.logger.Warn("failed to save/resize pane", "error", err, "pane", req.PaneID)
+	if err := h.sizeTracker.TrackAndResize(req.PaneID, req.Cols, req.Rows); err != nil {
+		h.logger.Warn("failed to track/resize pane", "error", err, "pane", req.PaneID)
 	} else {
 		attachCols, attachRows = 0, 0
 	}
@@ -306,7 +306,7 @@ func (h *Handler) detachPeer(peerID string) {
 		bridge.Close()
 	}
 
-	// Restore original pane size if this was the last mobile attached
+	// Auto-resize pane window if this was the last mobile attached
 	if paneID != "" {
 		if err := h.sizeTracker.RestoreIfLast(paneID); err != nil {
 			h.logger.Warn("failed to restore pane size", "error", err, "pane", paneID)
