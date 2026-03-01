@@ -48,28 +48,6 @@ func initSecretStore(paths config.Paths, cfg config.Config) (auth.SecretStore, e
 func main() {
 	args := os.Args[1:]
 
-	// Internal: agent background mode (spawned by supervisor)
-	// Supports optional --cpuprofile <file> and --memprofile <file> flags.
-	if len(args) >= 1 && args[0] == "--agent" {
-		var cpuProfile, memProfile string
-		for i := 1; i < len(args); i++ {
-			switch args[i] {
-			case "--cpuprofile":
-				if i+1 < len(args) {
-					cpuProfile = args[i+1]
-					i++
-				}
-			case "--memprofile":
-				if i+1 < len(args) {
-					memProfile = args[i+1]
-					i++
-				}
-			}
-		}
-		runAgent(cpuProfile, memProfile)
-		return
-	}
-
 	// Load effective config for socket name and other settings
 	cfg := loadEffectiveConfig()
 	socketName := cfg.Tmux.SocketName
@@ -101,11 +79,8 @@ func main() {
 	case "unpair":
 		handleUnpair(args[1:])
 		return
-	case "host-status":
-		handleHostStatus()
-		return
-	case "host-stop":
-		handleHostStop()
+	case "agent":
+		handleAgent(args[1:])
 		return
 	case "--version", "-v":
 		fmt.Printf("pmux version %s\n", version)
@@ -390,7 +365,7 @@ func handlePair() {
 	// hibernation, causing the pair CLI to hang. Stopping the agent ensures
 	// only one WebSocket exists for this device during pairing.
 	if err := agent.StopRunning(paths); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to stop host for pairing: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: failed to stop agent for pairing: %v\n", err)
 	}
 
 	// Get JWT for WebSocket auth
@@ -439,7 +414,7 @@ func handlePair() {
 func handleUnpair(args []string) {
 	paths, err := config.DefaultPaths()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "��� %v\n", err)
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 
@@ -476,7 +451,44 @@ func handleDevices() {
 	}
 }
 
-func handleHostStatus() {
+// handleAgent routes "pmux agent <subcommand>" to the appropriate handler.
+func handleAgent(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: pmux agent <run|status|stop>")
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "run":
+		// Internal: agent background/foreground mode (spawned by supervisor).
+		// Supports optional --cpuprofile <file> and --memprofile <file> flags.
+		var cpuProfile, memProfile string
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--cpuprofile":
+				if i+1 < len(args) {
+					cpuProfile = args[i+1]
+					i++
+				}
+			case "--memprofile":
+				if i+1 < len(args) {
+					memProfile = args[i+1]
+					i++
+				}
+			}
+		}
+		runAgent(cpuProfile, memProfile)
+	case "status":
+		handleAgentStatus()
+	case "stop":
+		handleAgentStop()
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown agent subcommand: %s\nUsage: pmux agent <run|status|stop>\n", args[0])
+		os.Exit(1)
+	}
+}
+
+func handleAgentStatus() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
@@ -487,17 +499,17 @@ func handleHostStatus() {
 
 	pid, err := agent.ReadPIDFile(pidFile)
 	if err != nil {
-		fmt.Println("Host is not running")
+		fmt.Println("Agent is not running")
 		os.Exit(1)
 	}
 
 	if !agent.IsProcessRunning(pid) {
-		fmt.Println("Host is not running (stale PID file)")
+		fmt.Println("Agent is not running (stale PID file)")
 		agent.CleanStalePIDFile(pidFile)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Host is running (PID %d)\n", pid)
+	fmt.Printf("Agent is running (PID %d)\n", pid)
 
 	// Try to get process uptime via ps
 	out, err := exec.Command("ps", "-o", "etime=", "-p", fmt.Sprintf("%d", pid)).Output()
@@ -508,7 +520,7 @@ func handleHostStatus() {
 		}
 	}
 
-	// Show last 5 lines of host log
+	// Show last 5 lines of agent log
 	logFile := filepath.Join(paths.ConfigDir, "agent.log")
 	lines, err := tailFile(logFile, 5)
 	if err == nil && len(lines) > 0 {
@@ -519,7 +531,7 @@ func handleHostStatus() {
 	}
 }
 
-func handleHostStop() {
+func handleAgentStop() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
@@ -530,12 +542,12 @@ func handleHostStop() {
 
 	pid, err := agent.ReadPIDFile(pidFile)
 	if err != nil {
-		fmt.Println("Host is not running")
+		fmt.Println("Agent is not running")
 		os.Exit(1)
 	}
 
 	if !agent.IsProcessRunning(pid) {
-		fmt.Println("Host is not running (stale PID file cleaned up)")
+		fmt.Println("Agent is not running (stale PID file cleaned up)")
 		agent.RemovePIDFile(pidFile)
 		os.Exit(0)
 	}
@@ -565,23 +577,23 @@ func handleHostStop() {
 	for {
 		select {
 		case <-deadline:
-			// Process didn't exit in time — send SIGKILL
+			// Process didn't exit in time - send SIGKILL
 			if err := process.Signal(syscall.SIGKILL); err != nil {
 				// Process may have exited between the last check and now
 				if !agent.IsProcessRunning(pid) {
-					fmt.Println("Host stopped")
+					fmt.Println("Agent stopped")
 					agent.RemovePIDFile(pidFile)
 					return
 				}
 				fmt.Fprintf(os.Stderr, "⚠ failed to send SIGKILL to PID %d: %v\n", pid, err)
 				os.Exit(1)
 			}
-			fmt.Println("Host forcefully killed")
+			fmt.Println("Agent forcefully killed")
 			agent.RemovePIDFile(pidFile)
 			return
 		case <-ticker.C:
 			if !agent.IsProcessRunning(pid) {
-				fmt.Println("Host stopped")
+				fmt.Println("Agent stopped")
 				agent.RemovePIDFile(pidFile)
 				return
 			}
@@ -609,18 +621,18 @@ func tailFile(path string, n int) ([]string, error) {
 }
 
 func printHelp() {
-	fmt.Println(`pmux — PocketMux terminal access host
+	fmt.Println(`pmux — PocketMux terminal access agent
 
 PocketMux commands:
-  init          Generate identity and register with signaling server
-  pair          Pair with a mobile device (displays QR code)
-  config        Show effective configuration with sources
-  devices       List paired mobile devices
-  unpair        Remove a paired mobile device
-  host-status   Show host process status and recent logs
-  host-stop     Stop the background host process
-  --version     Show version
-  --help        Show this help
+  init            Generate identity and register with signaling server
+  pair            Pair with a mobile device (displays QR code)
+  config          Show effective configuration with sources
+  devices         List paired mobile devices
+  unpair          Remove a paired mobile device
+  agent status    Show agent process status and recent logs
+  agent stop      Stop the background agent process
+  --version       Show version
+  --help          Show this help
 
 All other commands are passed through to tmux -L pmux.
 Run 'pmux' with no args to start a new session.
@@ -630,5 +642,5 @@ Examples:
   pmux new-session -s work      Named session
   pmux attach -t work           Attach to session
   pmux ls                       List sessions
-  pmux kill-server              Stop tmux server + host`)
+  pmux kill-server              Stop tmux server + agent`)
 }

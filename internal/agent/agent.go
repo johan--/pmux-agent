@@ -133,6 +133,7 @@ func Run(ctx context.Context, paths config.Paths) error {
 		handler.HandleMessage,
 	)
 	peerManager.MaxPeers = cfg.Connection.MaxMobileConnections
+	peerManager.OnPeerDisconnect = handler.PeerDisconnected
 
 	// Load paired device for connection validation
 	pairedDevicesPath := filepath.Join(paths.ConfigDir, "paired_devices.json")

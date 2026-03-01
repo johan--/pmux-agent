@@ -115,7 +115,7 @@ func spawn(pidFile string) error {
 		return fmt.Errorf("find executable path: %w", err)
 	}
 
-	cmd := exec.Command(exe, "--agent")
+	cmd := exec.Command(exe, "agent", "run")
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -123,7 +123,7 @@ func spawn(pidFile string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start host: %w", err)
+		return fmt.Errorf("start agent: %w", err)
 	}
 
 	// Write the child process PID so subsequent pmux commands can detect
