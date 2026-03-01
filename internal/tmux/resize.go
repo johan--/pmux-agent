@@ -21,19 +21,23 @@ func NewPaneSizeTracker(client *Client) *PaneSizeTracker {
 	}
 }
 
-// TrackAndResize increments the attach count for a pane and resizes
-// the pane's window to the given mobile dimensions.
+// TrackAndResize resizes the pane's window to the given mobile dimensions
+// and increments the attach count. The count is only incremented on success
+// so that RestoreIfLast never operates on a phantom attach.
 func (t *PaneSizeTracker) TrackAndResize(paneID string, cols, rows int) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	t.attachCount[paneID]++
 
 	windowTarget, err := t.client.windowForPane(paneID)
 	if err != nil {
 		return fmt.Errorf("find window for pane: %w", err)
 	}
-	return t.client.ResizeWindow(windowTarget, cols, rows)
+	if err := t.client.ResizeWindow(windowTarget, cols, rows); err != nil {
+		return err
+	}
+
+	t.attachCount[paneID]++
+	return nil
 }
 
 // RestoreIfLast decrements the attach count and auto-resizes the window

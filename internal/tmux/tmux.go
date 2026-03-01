@@ -34,13 +34,19 @@ type Client struct {
 }
 
 // NewClient creates a tmux client targeting the given socket.
+// It resolves the tmux binary to an absolute path so the client works
+// correctly inside launchd/systemd services where PATH is minimal.
 func NewClient(socket string) *Client {
 	if socket == "" {
 		socket = DefaultSocket
 	}
+	tmuxBin := "tmux"
+	if abs, err := exec.LookPath("tmux"); err == nil {
+		tmuxBin = abs
+	}
 	return &Client{
 		Socket:  socket,
-		TmuxBin: "tmux",
+		TmuxBin: tmuxBin,
 	}
 }
 

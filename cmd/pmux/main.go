@@ -237,8 +237,21 @@ func handleInit() {
 		input = defaultName
 	}
 
-	// Write config: start with commented defaults, then prepend the name
-	configContent := fmt.Sprintf("name = %q\n\n%s", input, config.CommentedDefaultConfig())
+	// Discover absolute tmux path for service environments where PATH is minimal.
+	tmuxPath, tmuxErr := exec.LookPath("tmux")
+	if tmuxErr != nil {
+		fmt.Printf("\n⚠ Could not find tmux in PATH: %v\n", tmuxErr)
+		fmt.Println("  Install tmux and re-run 'pmux init', or set tmux.tmux_path in config.toml.")
+	}
+
+	// Write config: start with name, then commented defaults with tmux path injected
+	tmuxSection := "# socket_name = \"pmux\""
+	if tmuxPath != "" {
+		tmuxSection += fmt.Sprintf("\ntmux_path = %q", tmuxPath)
+	}
+	template := strings.Replace(config.CommentedDefaultConfig(),
+		"# socket_name = \"pmux\"", tmuxSection, 1)
+	configContent := fmt.Sprintf("name = %q\n\n%s", input, template)
 	if err := os.WriteFile(paths.ConfigFile, []byte(configContent), 0600); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ failed to save config: %v\n", err)
 		os.Exit(1)
@@ -473,6 +486,9 @@ func handleStatus() {
 	exe, _ := os.Executable()
 	mgr := service.NewManager(exe, paths.ConfigDir)
 	tmuxClient := tmux.NewClient(cfg.Tmux.SocketName)
+	if cfg.Tmux.TmuxPath != "" {
+		tmuxClient.TmuxBin = cfg.Tmux.TmuxPath
+	}
 
 	params := agent.StatusParams{
 		PairedDevicesPath: paths.PairedDevices,

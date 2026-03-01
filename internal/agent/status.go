@@ -34,7 +34,7 @@ func RunStatus(params StatusParams, w io.Writer) error {
 			if IsProcessRunning(pid) {
 				agentLine = fmt.Sprintf("running (PID %d)", pid)
 			} else {
-				CleanStalePIDFile(params.PIDFilePath)
+				RemovePIDFile(params.PIDFilePath)
 			}
 		}
 	}

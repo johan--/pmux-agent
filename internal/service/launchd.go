@@ -83,12 +83,25 @@ func (m *launchdManager) Install() error {
 	uid := os.Getuid()
 	cmd := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", uid), m.plistPath())
 	if out, err := cmd.CombinedOutput(); err != nil {
-		// If already bootstrapped, try kickstart instead
-		if strings.Contains(string(out), "already bootstrapped") ||
-			strings.Contains(string(out), "service already loaded") {
-			return m.Start()
+		outStr := strings.TrimSpace(string(out))
+		// If already bootstrapped, bootout first then re-bootstrap to pick up
+		// any plist changes (e.g., updated binary path).
+		// Exit code 5 (I/O error) is launchd's way of saying the label is
+		// already loaded in this domain.
+		if strings.Contains(outStr, "already bootstrapped") ||
+			strings.Contains(outStr, "service already loaded") ||
+			strings.Contains(outStr, "Input/output error") {
+			_ = m.Uninstall()
+			if err := m.writePlist(); err != nil {
+				return fmt.Errorf("rewrite plist: %w", err)
+			}
+			cmd2 := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", uid), m.plistPath())
+			if out2, err2 := cmd2.CombinedOutput(); err2 != nil {
+				return fmt.Errorf("launchctl re-bootstrap: %s: %w", strings.TrimSpace(string(out2)), err2)
+			}
+			return nil
 		}
-		return fmt.Errorf("launchctl bootstrap: %s: %w", strings.TrimSpace(string(out)), err)
+		return fmt.Errorf("launchctl bootstrap: %s: %w", outStr, err)
 	}
 	return nil
 }

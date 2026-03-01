@@ -635,6 +635,160 @@ func verifyFixtureFields(t *testing.T, msg Message, expected fixtureJSON) {
 	}
 }
 
+// TestGoEncodedSessionsHasMapKeys verifies that Go-encoded SessionsEvent
+// uses msgpack map encoding with the field names that the TypeScript
+// @msgpack/msgpack decoder expects. This is the Go→TypeScript direction
+// which is NOT covered by the cross-language fixture tests (those test TS→Go).
+func TestGoEncodedSessionsHasMapKeys(t *testing.T) {
+	msg := &SessionsEvent{
+		Type: "sessions",
+		Sessions: []TmuxSession{
+			{
+				ID:      "$0",
+				Name:    "work",
+				Created: 1708700000,
+				Windows: []TmuxWindow{
+					{
+						ID:     "@0",
+						Name:   "editor",
+						Index:  0,
+						Active: true,
+						Panes: []TmuxPane{
+							{
+								ID:             "%0",
+								Index:          0,
+								Active:         true,
+								Size:           PaneSize{Cols: 80, Rows: 24},
+								Title:          "vim",
+								CurrentCommand: "vim",
+							},
+						},
+					},
+				},
+				LastActivity: 1708700100,
+				Attached:     false,
+			},
+			{
+				ID:      "$1",
+				Name:    "shell",
+				Created: 1708700200,
+				Windows: []TmuxWindow{
+					{
+						ID:     "@1",
+						Name:   "main",
+						Index:  0,
+						Active: true,
+						Panes: []TmuxPane{
+							{
+								ID:             "%1",
+								Index:          0,
+								Active:         true,
+								Size:           PaneSize{Cols: 120, Rows: 40},
+								Title:          "zsh",
+								CurrentCommand: "zsh",
+							},
+						},
+					},
+				},
+				LastActivity: 1708700300,
+				Attached:     true,
+			},
+		},
+	}
+
+	data, err := Encode(msg)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	// Decode using raw msgpack into a generic map to verify field names
+	var raw map[string]interface{}
+	if err := msgpack.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal to raw map: %v", err)
+	}
+
+	// Verify top-level fields
+	if raw["type"] != "sessions" {
+		t.Errorf("type = %v, want 'sessions'", raw["type"])
+	}
+
+	sessions, ok := raw["sessions"].([]interface{})
+	if !ok {
+		t.Fatalf("sessions field is %T, want []interface{}", raw["sessions"])
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("sessions count = %d, want 2", len(sessions))
+	}
+
+	// Verify first session has correct field names (camelCase matching TS)
+	s0, ok := sessions[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("session[0] is %T, want map[string]interface{}", sessions[0])
+	}
+
+	expectedSessionKeys := []string{"id", "name", "created", "windows", "lastActivity", "attached"}
+	for _, key := range expectedSessionKeys {
+		if _, exists := s0[key]; !exists {
+			t.Errorf("session[0] missing key %q (keys: %v)", key, mapKeys(s0))
+		}
+	}
+
+	// Verify windows → panes nesting
+	windows, ok := s0["windows"].([]interface{})
+	if !ok || len(windows) == 0 {
+		t.Fatalf("session[0].windows is %T (len %v)", s0["windows"], len(windows))
+	}
+	w0, ok := windows[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("window[0] is %T, want map[string]interface{}", windows[0])
+	}
+
+	expectedWindowKeys := []string{"id", "name", "index", "active", "panes"}
+	for _, key := range expectedWindowKeys {
+		if _, exists := w0[key]; !exists {
+			t.Errorf("window[0] missing key %q (keys: %v)", key, mapKeys(w0))
+		}
+	}
+
+	panes, ok := w0["panes"].([]interface{})
+	if !ok || len(panes) == 0 {
+		t.Fatalf("window[0].panes is %T (len %v)", w0["panes"], len(panes))
+	}
+	p0, ok := panes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("pane[0] is %T, want map[string]interface{}", panes[0])
+	}
+
+	expectedPaneKeys := []string{"id", "index", "active", "size", "title", "currentCommand"}
+	for _, key := range expectedPaneKeys {
+		if _, exists := p0[key]; !exists {
+			t.Errorf("pane[0] missing key %q (keys: %v)", key, mapKeys(p0))
+		}
+	}
+
+	// Verify size sub-object
+	size, ok := p0["size"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("pane[0].size is %T, want map[string]interface{}", p0["size"])
+	}
+	if _, exists := size["cols"]; !exists {
+		t.Errorf("size missing 'cols' key")
+	}
+	if _, exists := size["rows"]; !exists {
+		t.Errorf("size missing 'rows' key")
+	}
+
+	t.Logf("Go-encoded SessionsEvent uses correct map keys for TypeScript compatibility")
+}
+
+func mapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func verifyBinaryData(t *testing.T, got []byte, expected []int) {
 	t.Helper()
 	if len(got) != len(expected) {

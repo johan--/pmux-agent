@@ -122,16 +122,42 @@ func (h *Handler) handleListSessions(peerID string) {
 		return
 	}
 
-	h.sendMsg(peerID, &protocol.SessionsEvent{
+	// Log session tree summary for debugging mobile display issues.
+	totalWindows, totalPanes := 0, 0
+	for _, s := range sessions {
+		totalWindows += len(s.Windows)
+		for _, w := range s.Windows {
+			totalPanes += len(w.Panes)
+		}
+	}
+	h.logger.Debug("list_sessions response",
+		"peer", peerID,
+		"sessions", len(sessions),
+		"windows", totalWindows,
+		"panes", totalPanes,
+	)
+
+	if err := h.sendMsg(peerID, &protocol.SessionsEvent{
 		Type:     "sessions",
 		Sessions: sessions,
-	})
+	}); err != nil {
+		h.logger.Warn("failed to send sessions event", "peer", peerID, "error", err)
+	}
 }
 
 func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 	// Validate pane ID format before passing to tmux CLI.
 	if !validTmuxTarget.MatchString(req.PaneID) {
 		h.sendError(peerID, "attach_failed", fmt.Sprintf("invalid pane ID: %q", req.PaneID))
+		return
+	}
+
+	// Validate dimensions (same bounds as handleResize).
+	if req.Cols < minResizeDimension || req.Cols > maxResizeDimension ||
+		req.Rows < minResizeDimension || req.Rows > maxResizeDimension {
+		h.sendError(peerID, "attach_failed",
+			fmt.Sprintf("dimensions out of range: cols=%d rows=%d (must be %d-%d)",
+				req.Cols, req.Rows, minResizeDimension, maxResizeDimension))
 		return
 	}
 
@@ -309,7 +335,7 @@ func (h *Handler) streamOutput(ctx context.Context, peerID string, bridge *tmux.
 }
 
 // detachPeer cancels the streamOutput goroutine, closes any existing bridge
-// for a peer, and restores the original pane size if this was the last
+// for a peer, and auto-resizes the pane window if this was the last
 // mobile client attached.
 func (h *Handler) detachPeer(peerID string) {
 	h.mu.Lock()

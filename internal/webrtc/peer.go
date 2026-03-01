@@ -19,11 +19,6 @@ import (
 // DataChannelLabel is the name of the WebRTC DataChannel used for terminal protocol.
 const DataChannelLabel = "terminal"
 
-// maxMessageSize is the maximum size in bytes for a single DataChannel message
-// used for terminal I/O. Terminal data is typically small (< 1KB), so 4KB
-// provides ample headroom without excessive memory allocation.
-const maxMessageSize = 4096
-
 // bufferedAmountLowThreshold is the byte threshold at which the DataChannel
 // fires the OnBufferedAmountLow callback, enabling backpressure-aware sending.
 const bufferedAmountLowThreshold = 4096
@@ -181,6 +176,20 @@ func (pm *PeerManager) CloseAll() {
 			"goroutines", runtime.NumGoroutine(),
 		)
 	}
+}
+
+// scheduleCleanup spawns a tracked goroutine that notifies the disconnect
+// handler and closes the peer. Safe to call while pm.mu is held because
+// ClosePeer runs asynchronously in the spawned goroutine.
+func (pm *PeerManager) scheduleCleanup(deviceID string) {
+	pm.cleanupWg.Add(1)
+	go func() {
+		defer pm.cleanupWg.Done()
+		if pm.OnPeerDisconnect != nil {
+			pm.OnPeerDisconnect(deviceID)
+		}
+		pm.ClosePeer(deviceID)
+	}()
 }
 
 // PeerCount returns the number of active peer connections.
@@ -500,15 +509,11 @@ func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerC
 			timer.Stop()
 			delete(pm.disconnectTimers, deviceID)
 		}
-		pm.logger.Info("peer connection failed, closing peer", "mobile", deviceID)
-		pm.cleanupWg.Add(1)
-		go func() {
-			defer pm.cleanupWg.Done()
-			if pm.OnPeerDisconnect != nil {
-				pm.OnPeerDisconnect(deviceID)
-			}
-			pm.ClosePeer(deviceID)
-		}()
+		// Only notify if the peer is still tracked (avoids double-fire and WaitGroup race during CloseAll).
+		if _, ok := pm.peers[deviceID]; ok {
+			pm.logger.Info("peer connection failed, closing peer", "mobile", deviceID)
+			pm.scheduleCleanup(deviceID)
+		}
 
 	case webrtc.PeerConnectionStateClosed:
 		// Peer connection closed — cancel timer and notify handler.
@@ -518,14 +523,7 @@ func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerC
 		}
 		// Only notify if the peer is still tracked (avoids double-fire after Failed→Closed).
 		if _, ok := pm.peers[deviceID]; ok {
-			pm.cleanupWg.Add(1)
-			go func() {
-				defer pm.cleanupWg.Done()
-				if pm.OnPeerDisconnect != nil {
-					pm.OnPeerDisconnect(deviceID)
-				}
-				pm.ClosePeer(deviceID)
-			}()
+			pm.scheduleCleanup(deviceID)
 		}
 	}
 }
@@ -567,27 +565,13 @@ func (pm *PeerManager) attemptICERestart(deviceID string) {
 	offer, err := peer.conn.CreateOffer(&webrtc.OfferOptions{ICERestart: true})
 	if err != nil {
 		pm.logger.Error("ICE restart: failed to create offer", "error", err, "mobile", deviceID)
-		pm.cleanupWg.Add(1)
-		go func() {
-			defer pm.cleanupWg.Done()
-			if pm.OnPeerDisconnect != nil {
-				pm.OnPeerDisconnect(deviceID)
-			}
-			pm.ClosePeer(deviceID)
-		}()
+		pm.scheduleCleanup(deviceID)
 		return
 	}
 
 	if err := peer.conn.SetLocalDescription(offer); err != nil {
 		pm.logger.Error("ICE restart: failed to set local description", "error", err, "mobile", deviceID)
-		pm.cleanupWg.Add(1)
-		go func() {
-			defer pm.cleanupWg.Done()
-			if pm.OnPeerDisconnect != nil {
-				pm.OnPeerDisconnect(deviceID)
-			}
-			pm.ClosePeer(deviceID)
-		}()
+		pm.scheduleCleanup(deviceID)
 		return
 	}
 
@@ -597,14 +581,7 @@ func (pm *PeerManager) attemptICERestart(deviceID string) {
 		SDP:            offer.SDP,
 	}); err != nil {
 		pm.logger.Error("ICE restart: failed to send SDP offer", "error", err, "mobile", deviceID)
-		pm.cleanupWg.Add(1)
-		go func() {
-			defer pm.cleanupWg.Done()
-			if pm.OnPeerDisconnect != nil {
-				pm.OnPeerDisconnect(deviceID)
-			}
-			pm.ClosePeer(deviceID)
-		}()
+		pm.scheduleCleanup(deviceID)
 		return
 	}
 

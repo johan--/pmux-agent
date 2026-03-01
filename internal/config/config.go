@@ -33,6 +33,7 @@ const (
 	EnvSocketName      = "PMUX_SOCKET_NAME"
 	EnvMaxConnections  = "PMUX_MAX_CONNECTIONS"
 	EnvSecretBackend   = "PMUX_SECRET_BACKEND"
+	EnvTmuxPath        = "PMUX_TMUX_PATH"
 )
 
 // Config holds user-editable PocketMux configuration from config.toml.
@@ -65,6 +66,7 @@ type ConnectionConfig struct {
 // TmuxConfig holds tmux-related configuration.
 type TmuxConfig struct {
 	SocketName string `toml:"socket_name"`
+	TmuxPath   string `toml:"tmux_path"` // Absolute path to tmux binary (resolved at init time)
 }
 
 // configSource tracks where each config value originated.
@@ -96,6 +98,7 @@ type ConfigSources struct {
 	KeepaliveInterval    configSource
 	MaxMobileConnections configSource
 	SocketName           configSource
+	TmuxPath             configSource
 	Name                 configSource
 }
 
@@ -193,6 +196,9 @@ func overlayFile(cfg *Config, fileCfg *Config) {
 	if fileCfg.Tmux.SocketName != "" {
 		cfg.Tmux.SocketName = fileCfg.Tmux.SocketName
 	}
+	if fileCfg.Tmux.TmuxPath != "" {
+		cfg.Tmux.TmuxPath = fileCfg.Tmux.TmuxPath
+	}
 }
 
 // overlayFileTracked is like overlayFile but also records source annotations.
@@ -229,6 +235,10 @@ func overlayFileTracked(cfg *Config, fileCfg *Config, sources *ConfigSources) {
 		cfg.Tmux.SocketName = fileCfg.Tmux.SocketName
 		sources.SocketName = sourceFile
 	}
+	if fileCfg.Tmux.TmuxPath != "" {
+		cfg.Tmux.TmuxPath = fileCfg.Tmux.TmuxPath
+		sources.TmuxPath = sourceFile
+	}
 }
 
 // applyEnvOverrides overlays environment variable values onto the config.
@@ -244,6 +254,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv(EnvSocketName); v != "" {
 		cfg.Tmux.SocketName = v
+	}
+	if v := os.Getenv(EnvTmuxPath); v != "" {
+		cfg.Tmux.TmuxPath = v
 	}
 	if v := os.Getenv(EnvSecretBackend); v != "" {
 		cfg.Identity.SecretBackend = v
@@ -271,6 +284,10 @@ func applyEnvOverridesTracked(cfg *Config, sources *ConfigSources) {
 	if v := os.Getenv(EnvSocketName); v != "" {
 		cfg.Tmux.SocketName = v
 		sources.SocketName = sourceEnv
+	}
+	if v := os.Getenv(EnvTmuxPath); v != "" {
+		cfg.Tmux.TmuxPath = v
+		sources.TmuxPath = sourceEnv
 	}
 	if v := os.Getenv(EnvSecretBackend); v != "" {
 		cfg.Identity.SecretBackend = v
@@ -366,6 +383,7 @@ func FormatEffective(cfg Config, sources ConfigSources) string {
 	fmt.Fprintf(&b, "connection.keepalive_interval = %q  (%s)\n", cfg.Connection.KeepaliveInterval, sources.KeepaliveInterval)
 	fmt.Fprintf(&b, "connection.max_mobile_connections = %d  (%s)\n", cfg.Connection.MaxMobileConnections, sources.MaxMobileConnections)
 	fmt.Fprintf(&b, "tmux.socket_name = %q  (%s)\n", cfg.Tmux.SocketName, sources.SocketName)
+	fmt.Fprintf(&b, "tmux.tmux_path = %q  (%s)\n", cfg.Tmux.TmuxPath, sources.TmuxPath)
 	return b.String()
 }
 
@@ -395,6 +413,9 @@ func CommentedDefaultConfig() string {
 
 [tmux]
 # socket_name = "pmux"
+# Absolute path to tmux binary (env: PMUX_TMUX_PATH)
+# Resolved automatically during 'pmux init'. Set manually if tmux moves.
+# tmux_path = "/opt/homebrew/bin/tmux"
 `
 }
 

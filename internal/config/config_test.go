@@ -32,7 +32,7 @@ func TestDefaults(t *testing.T) {
 
 func TestLoadConfig_Nonexistent(t *testing.T) {
 	// Ensure env vars don't interfere
-	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections} {
+	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections, EnvTmuxPath} {
 		t.Setenv(env, "")
 	}
 
@@ -55,7 +55,7 @@ func TestLoadConfig_Nonexistent(t *testing.T) {
 }
 
 func TestLoadConfig_FileOverridesDefaults(t *testing.T) {
-	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections} {
+	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections, EnvTmuxPath} {
 		t.Setenv(env, "")
 	}
 
@@ -74,6 +74,7 @@ max_mobile_connections = 10
 
 [tmux]
 socket_name = "custom-socket"
+tmux_path = "/usr/local/bin/tmux"
 `
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatalf("WriteFile() error: %v", err)
@@ -99,6 +100,9 @@ socket_name = "custom-socket"
 	}
 	if cfg.Tmux.SocketName != "custom-socket" {
 		t.Errorf("Tmux.SocketName = %q, want %q", cfg.Tmux.SocketName, "custom-socket")
+	}
+	if cfg.Tmux.TmuxPath != "/usr/local/bin/tmux" {
+		t.Errorf("Tmux.TmuxPath = %q, want %q", cfg.Tmux.TmuxPath, "/usr/local/bin/tmux")
 	}
 
 	// Unset file values should retain defaults
@@ -132,6 +136,7 @@ socket_name = "from-file"
 	t.Setenv(EnvSocketName, "from-env")
 	t.Setenv(EnvMaxConnections, "3")
 	t.Setenv(EnvKeyPath, "/custom/keys/")
+	t.Setenv(EnvTmuxPath, "")
 
 	cfg, err := LoadConfig(path)
 	if err != nil {
@@ -153,8 +158,35 @@ socket_name = "from-file"
 	}
 }
 
+func TestLoadConfig_TmuxPathEnvOverride(t *testing.T) {
+	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections, EnvTmuxPath} {
+		t.Setenv(env, "")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[tmux]
+tmux_path = "/from/file/tmux"
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	// Env should override file
+	t.Setenv(EnvTmuxPath, "/from/env/tmux")
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.Tmux.TmuxPath != "/from/env/tmux" {
+		t.Errorf("Tmux.TmuxPath = %q, want %q", cfg.Tmux.TmuxPath, "/from/env/tmux")
+	}
+}
+
 func TestLoadConfig_LegacyEnvVar(t *testing.T) {
-	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections} {
+	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections, EnvTmuxPath} {
 		t.Setenv(env, "")
 	}
 
@@ -398,7 +430,7 @@ func TestServerURL_Method(t *testing.T) {
 }
 
 func TestSaveAndLoadConfig(t *testing.T) {
-	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections} {
+	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections, EnvTmuxPath} {
 		t.Setenv(env, "")
 	}
 
@@ -444,7 +476,7 @@ func TestDefaultHostName(t *testing.T) {
 }
 
 func TestLoadConfigWithSources_AllDefaults(t *testing.T) {
-	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections} {
+	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections, EnvTmuxPath} {
 		t.Setenv(env, "")
 	}
 
@@ -468,7 +500,7 @@ func TestLoadConfigWithSources_AllDefaults(t *testing.T) {
 }
 
 func TestLoadConfigWithSources_FileSources(t *testing.T) {
-	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections} {
+	for _, env := range []string{EnvNewServerURL, EnvServerURL, EnvKeyPath, EnvSocketName, EnvMaxConnections, EnvTmuxPath} {
 		t.Setenv(env, "")
 	}
 
@@ -513,6 +545,7 @@ keepalive_interval = "15s"
 	t.Setenv(EnvKeyPath, "")
 	t.Setenv(EnvSocketName, "")
 	t.Setenv(EnvMaxConnections, "")
+	t.Setenv(EnvTmuxPath, "")
 
 	_, sources, err := LoadConfigWithSources(path)
 	if err != nil {
@@ -540,6 +573,7 @@ func TestFormatEffective(t *testing.T) {
 	if !containsAll(output, []string{
 		`server.url = "https://signal.pmux.io"  (default)`,
 		`tmux.socket_name = "pmux"  (default)`,
+		`tmux.tmux_path = ""  (default)`,
 		`connection.max_mobile_connections = 1  (default)`,
 	}) {
 		t.Errorf("FormatEffective() output missing expected content:\n%s", output)
@@ -558,6 +592,8 @@ func TestCommentedDefaultConfig(t *testing.T) {
 		"PMUX_KEY_PATH",
 		`# url = "https://signal.pmux.io"`,
 		`# socket_name = "pmux"`,
+		`PMUX_TMUX_PATH`,
+		`# tmux_path = "/opt/homebrew/bin/tmux"`,
 	}
 
 	for _, s := range expectedStrings {

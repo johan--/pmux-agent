@@ -85,8 +85,13 @@ func Run(ctx context.Context, paths config.Paths) error {
 	}
 	logger.Info("identity loaded", "deviceID", identity.DeviceID)
 
-	// Create tmux client targeting the configured socket
+	// Create tmux client targeting the configured socket.
+	// Use the configured tmux path (resolved at init time) so the agent works
+	// in service environments where PATH is minimal (e.g., launchd, systemd).
 	tmuxClient := tmux.NewClient(cfg.Tmux.SocketName)
+	if cfg.Tmux.TmuxPath != "" {
+		tmuxClient.TmuxBin = cfg.Tmux.TmuxPath
+	}
 
 	serverURL := cfg.ServerURL()
 
