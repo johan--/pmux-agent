@@ -74,11 +74,11 @@ func main() {
 	case "config":
 		handleConfig()
 		return
-	case "devices":
-		handleDevices()
+	case "status":
+		handleStatus()
 		return
 	case "unpair":
-		handleUnpair(args[1:])
+		handleUnpair()
 		return
 	case "agent":
 		handleAgent(args[1:])
@@ -443,7 +443,7 @@ func handlePair() {
 	fmt.Printf("Paired successfully with device %s\n", pairComplete.MobileDeviceID)
 }
 
-func handleUnpair(args []string) {
+func handleUnpair() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
@@ -457,13 +457,13 @@ func handleUnpair(args []string) {
 		os.Exit(1)
 	}
 
-	if err := agent.RunUnpair(args, paths.PairedDevices, store, os.Stdin, os.Stdout); err != nil {
+	if err := agent.RunUnpair(paths.PairedDevices, store, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func handleDevices() {
+func handleStatus() {
 	paths, err := config.DefaultPaths()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
@@ -477,7 +477,7 @@ func handleDevices() {
 		os.Exit(1)
 	}
 
-	if err := agent.RunDevices(paths.PairedDevices, store, os.Stdout); err != nil {
+	if err := agent.RunStatus(paths.PairedDevices, store, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
@@ -772,8 +772,8 @@ PocketMux commands:
   init              Generate identity and configure agent
   pair              Pair with a mobile device (displays QR code)
   config            Show effective configuration with sources
-  devices           List paired mobile devices
-  unpair            Remove a paired mobile device
+  status            Show paired mobile device
+  unpair            Remove the paired mobile device
   agent run         Run the agent in the foreground
   agent start       Start the agent
   agent stop        Stop the agent
