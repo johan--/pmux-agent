@@ -240,6 +240,19 @@ func handleInit() {
 	fmt.Printf("Device ID: %s\n", id.DeviceID)
 	fmt.Printf("Host name: %s\n", input)
 	fmt.Printf("Keys saved to: %s (backend: %s)\n", paths.KeysDir, store.Backend())
+
+	// Install agent as OS service
+	exe, exeErr := os.Executable()
+	if exeErr == nil {
+		mgr := service.NewManager(exe, paths.ConfigDir)
+		if err := mgr.Install(); err != nil {
+			fmt.Printf("\n⚠ Could not install service: %v\n", err)
+			fmt.Println("  The agent will still start automatically when you run pmux commands.")
+			fmt.Println("  Run 'pmux agent install' later to enable always-on mode.")
+		} else {
+			fmt.Println("\nService installed. Agent is running.")
+		}
+	}
 }
 
 func handleConfig() {
