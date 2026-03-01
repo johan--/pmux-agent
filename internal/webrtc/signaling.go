@@ -308,7 +308,10 @@ func (sc *SignalingClient) authenticate(conn *websocket.Conn) error {
 	sc.mu.Unlock()
 
 	authMsg := SignalingMessage{Type: "auth", Token: jwt}
-	data, _ := json.Marshal(authMsg)
+	data, err := json.Marshal(authMsg)
+	if err != nil {
+		return fmt.Errorf("marshal auth message: %w", err)
+	}
 
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		return fmt.Errorf("send auth message: %w", err)
@@ -365,10 +368,14 @@ func (sc *SignalingClient) presenceLoop(ctx context.Context, conn *websocket.Con
 			return
 		case <-ticker.C:
 			msg := SignalingMessage{Type: "presence"}
-			data, _ := json.Marshal(msg)
+			data, err := json.Marshal(msg)
+			if err != nil {
+				sc.logger.Warn("marshal presence message failed", "error", err)
+				continue
+			}
 
 			sc.mu.Lock()
-			err := conn.WriteMessage(websocket.TextMessage, data)
+			err = conn.WriteMessage(websocket.TextMessage, data)
 			sc.mu.Unlock()
 
 			if err != nil {

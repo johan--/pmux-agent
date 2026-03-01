@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,22 @@ import (
 	"github.com/shiftinbits/pmux-agent/internal/tmux"
 	"github.com/shiftinbits/pmux-agent/internal/webrtc"
 )
+
+// FatalInitError wraps errors that won't self-resolve on restart,
+// such as missing identity, corrupt config, or secret store failures.
+// These should cause the agent to exit without triggering a service restart.
+type FatalInitError struct {
+	Err error
+}
+
+func (e *FatalInitError) Error() string { return e.Err.Error() }
+func (e *FatalInitError) Unwrap() error { return e.Err }
+
+// IsFatalInitError reports whether err is a FatalInitError.
+func IsFatalInitError(err error) bool {
+	var fatal *FatalInitError
+	return errors.As(err, &fatal)
+}
 
 // serverChecker abstracts tmux server liveness checks for testability.
 type serverChecker interface {
@@ -57,14 +74,14 @@ func Run(ctx context.Context, paths config.Paths) error {
 	// Create secret store for secure key storage
 	store, err := auth.NewSecretStore(paths.KeysDir, cfg.Identity.SecretBackend)
 	if err != nil {
-		return fmt.Errorf("initialize secret store: %w", err)
+		return &FatalInitError{Err: fmt.Errorf("initialize secret store: %w", err)}
 	}
 	logger.Info("secret store initialized", "backend", store.Backend())
 
 	// Load identity
 	identity, err := auth.LoadIdentity(paths.KeysDir, store)
 	if err != nil {
-		return fmt.Errorf("load identity: %w", err)
+		return &FatalInitError{Err: fmt.Errorf("load identity: %w", err)}
 	}
 	logger.Info("identity loaded", "deviceID", identity.DeviceID)
 

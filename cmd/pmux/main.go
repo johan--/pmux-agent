@@ -174,21 +174,13 @@ func runAgent(cpuProfile, memProfile string) {
 	if agentErr != nil && agentErr != context.Canceled {
 		// Fatal initialization errors should not trigger service restart.
 		// These won't self-resolve, so exit 0 to prevent restart loops.
-		if isFatalInitError(agentErr) {
+		if agent.IsFatalInitError(agentErr) {
 			fmt.Fprintf(os.Stderr, "fatal: %v\n", agentErr)
 			os.Exit(0)
 		}
 		// Runtime errors: exit 1 so service manager restarts us.
 		os.Exit(1)
 	}
-}
-
-// isFatalInitError returns true for errors that won't self-resolve on restart.
-func isFatalInitError(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "load identity") ||
-		strings.Contains(msg, "initialize secret store") ||
-		strings.Contains(msg, "parse config")
 }
 
 func handleInit() {

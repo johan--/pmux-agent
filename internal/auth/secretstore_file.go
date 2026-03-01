@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -308,8 +310,12 @@ func readLinuxMachineID() ([]byte, error) {
 }
 
 // readMacOSMachineID reads the IOPlatformUUID via ioreg.
+// Uses a 5-second timeout to prevent blocking agent startup if ioreg hangs.
 func readMacOSMachineID() ([]byte, error) {
-	out, err := exec.Command("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output()
 	if err != nil {
 		return nil, fmt.Errorf("ioreg: %w", err)
 	}

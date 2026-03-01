@@ -80,6 +80,7 @@ type PeerManager struct {
 	mu               sync.Mutex
 	peers            map[string]*Peer          // keyed by mobile device ID
 	disconnectTimers map[string]*time.Timer    // grace timers for disconnected peers
+	cleanupWg        sync.WaitGroup            // tracks background cleanup goroutines
 }
 
 // Peer represents a single WebRTC peer connection to a mobile device.
@@ -148,7 +149,8 @@ func (pm *PeerManager) ClosePeer(deviceID string) {
 	}
 }
 
-// CloseAll closes all peer connections.
+// CloseAll closes all peer connections and waits for background cleanup
+// goroutines (from state change handlers) to finish.
 func (pm *PeerManager) CloseAll() {
 	pm.mu.Lock()
 	peers := make([]*Peer, 0, len(pm.peers))
@@ -168,6 +170,10 @@ func (pm *PeerManager) CloseAll() {
 	for _, p := range peers {
 		p.Close()
 	}
+
+	// Wait for any in-flight cleanup goroutines spawned by handlePeerStateChange
+	// or attemptICERestart to finish before returning.
+	pm.cleanupWg.Wait()
 
 	if closedCount > 0 {
 		pm.logger.Info("all peers closed",
@@ -495,7 +501,9 @@ func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerC
 			delete(pm.disconnectTimers, deviceID)
 		}
 		pm.logger.Info("peer connection failed, closing peer", "mobile", deviceID)
+		pm.cleanupWg.Add(1)
 		go func() {
+			defer pm.cleanupWg.Done()
 			if pm.OnPeerDisconnect != nil {
 				pm.OnPeerDisconnect(deviceID)
 			}
@@ -510,7 +518,9 @@ func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerC
 		}
 		// Only notify if the peer is still tracked (avoids double-fire after Failed→Closed).
 		if _, ok := pm.peers[deviceID]; ok {
+			pm.cleanupWg.Add(1)
 			go func() {
+				defer pm.cleanupWg.Done()
 				if pm.OnPeerDisconnect != nil {
 					pm.OnPeerDisconnect(deviceID)
 				}
@@ -557,7 +567,9 @@ func (pm *PeerManager) attemptICERestart(deviceID string) {
 	offer, err := peer.conn.CreateOffer(&webrtc.OfferOptions{ICERestart: true})
 	if err != nil {
 		pm.logger.Error("ICE restart: failed to create offer", "error", err, "mobile", deviceID)
+		pm.cleanupWg.Add(1)
 		go func() {
+			defer pm.cleanupWg.Done()
 			if pm.OnPeerDisconnect != nil {
 				pm.OnPeerDisconnect(deviceID)
 			}
@@ -568,7 +580,9 @@ func (pm *PeerManager) attemptICERestart(deviceID string) {
 
 	if err := peer.conn.SetLocalDescription(offer); err != nil {
 		pm.logger.Error("ICE restart: failed to set local description", "error", err, "mobile", deviceID)
+		pm.cleanupWg.Add(1)
 		go func() {
+			defer pm.cleanupWg.Done()
 			if pm.OnPeerDisconnect != nil {
 				pm.OnPeerDisconnect(deviceID)
 			}
@@ -583,7 +597,9 @@ func (pm *PeerManager) attemptICERestart(deviceID string) {
 		SDP:            offer.SDP,
 	}); err != nil {
 		pm.logger.Error("ICE restart: failed to send SDP offer", "error", err, "mobile", deviceID)
+		pm.cleanupWg.Add(1)
 		go func() {
+			defer pm.cleanupWg.Done()
 			if pm.OnPeerDisconnect != nil {
 				pm.OnPeerDisconnect(deviceID)
 			}

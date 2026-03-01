@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,6 +12,19 @@ import (
 	"github.com/shiftinbits/pmux-agent/internal/protocol"
 	"github.com/shiftinbits/pmux-agent/internal/tmux"
 )
+
+const (
+	// maxResizeDimension is the upper bound for resize column/row values.
+	// No real terminal exceeds 500 columns or rows.
+	maxResizeDimension = 500
+
+	// minResizeDimension is the lower bound for resize column/row values.
+	minResizeDimension = 1
+)
+
+// validTmuxTarget matches tmux pane/session/window IDs like %0, $1, @2,
+// $1:@2.%3, session-name, etc. Rejects shell metacharacters.
+var validTmuxTarget = regexp.MustCompile(`^[a-zA-Z0-9_.$@:%\-]+$`)
 
 // SendFunc sends a protocol message to a specific peer.
 type SendFunc func(peerID string, msg protocol.Message) error
@@ -114,21 +129,35 @@ func (h *Handler) handleListSessions(peerID string) {
 }
 
 func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
+	// Validate pane ID format before passing to tmux CLI.
+	if !validTmuxTarget.MatchString(req.PaneID) {
+		h.sendError(peerID, "attach_failed", fmt.Sprintf("invalid pane ID: %q", req.PaneID))
+		return
+	}
+
 	// Detach from any existing pane first
 	h.detachPeer(peerID)
 
 	// Track attach and resize for mobile.
 	// On success, pass 0,0 to AttachPane so it skips its redundant resize.
 	// On failure, pass the real dimensions so AttachPane resizes as fallback.
+	sizeTracked := false
 	attachCols, attachRows := req.Cols, req.Rows
 	if err := h.sizeTracker.TrackAndResize(req.PaneID, req.Cols, req.Rows); err != nil {
 		h.logger.Warn("failed to track/resize pane", "error", err, "pane", req.PaneID)
 	} else {
 		attachCols, attachRows = 0, 0
+		sizeTracked = true
 	}
 
 	bridge, err := h.tmux.AttachPane(req.PaneID, attachCols, attachRows)
 	if err != nil {
+		// Clean up size tracking if attach fails to prevent leaked state.
+		if sizeTracked {
+			if restoreErr := h.sizeTracker.RestoreIfLast(req.PaneID); restoreErr != nil {
+				h.logger.Warn("failed to restore pane size after attach failure", "error", restoreErr, "pane", req.PaneID)
+			}
+		}
 		h.sendError(peerID, "attach_failed", err.Error())
 		return
 	}
@@ -181,6 +210,15 @@ func (h *Handler) handleInput(peerID string, req *protocol.InputRequest) {
 }
 
 func (h *Handler) handleResize(peerID string, req *protocol.ResizeRequest) {
+	// Validate dimensions to prevent resource abuse or unexpected tmux behavior.
+	if req.Cols < minResizeDimension || req.Cols > maxResizeDimension ||
+		req.Rows < minResizeDimension || req.Rows > maxResizeDimension {
+		h.sendError(peerID, "resize_failed",
+			fmt.Sprintf("dimensions out of range: cols=%d rows=%d (must be %d-%d)",
+				req.Cols, req.Rows, minResizeDimension, maxResizeDimension))
+		return
+	}
+
 	h.mu.Lock()
 	bridge := h.bridges[peerID]
 	h.mu.Unlock()
@@ -210,6 +248,12 @@ func (h *Handler) handlePing(peerID string) {
 }
 
 func (h *Handler) handleKillSession(peerID string, req *protocol.KillSessionRequest) {
+	// Validate session ID format before passing to tmux CLI.
+	if !validTmuxTarget.MatchString(req.Session) {
+		h.sendError(peerID, "kill_session_failed", fmt.Sprintf("invalid session ID: %q", req.Session))
+		return
+	}
+
 	if err := h.tmux.KillSession(req.Session); err != nil {
 		h.sendError(peerID, "kill_session_failed", err.Error())
 		return

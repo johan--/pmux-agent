@@ -6,6 +6,13 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+// MaxMessageSize is the maximum size in bytes for an incoming protocol message.
+// Terminal I/O data is typically < 4KB. This limit provides defense-in-depth
+// against malicious or malformed messages causing memory exhaustion.
+// The WebRTC DataChannel has its own limits, but validating here catches issues
+// regardless of transport.
+const MaxMessageSize = 1 << 20 // 1 MiB
+
 // messageEnvelope is used to extract the type field for dispatching.
 type messageEnvelope struct {
 	Type string `msgpack:"type"`
@@ -22,7 +29,12 @@ func Encode(msg Message) ([]byte, error) {
 
 // Decode deserializes MessagePack binary to a protocol message.
 // It inspects the "type" field first, then decodes into the correct Go struct.
+// Returns an error if the message exceeds MaxMessageSize.
 func Decode(data []byte) (Message, error) {
+	if len(data) > MaxMessageSize {
+		return nil, fmt.Errorf("decode: message size %d exceeds maximum %d", len(data), MaxMessageSize)
+	}
+
 	var env messageEnvelope
 	if err := msgpack.Unmarshal(data, &env); err != nil {
 		return nil, fmt.Errorf("decode envelope: %w", err)
