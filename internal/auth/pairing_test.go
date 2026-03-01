@@ -363,3 +363,42 @@ func TestLoadPairedDevice_Singular(t *testing.T) {
 		}
 	})
 }
+
+func TestRemovePairedDevice_DeletesSecret(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "paired_devices.json")
+	store := NewMemorySecretStore()
+
+	err := AddPairedDevice(path, PairedDevice{
+		DeviceID:     "mobile-1",
+		SharedSecret: base64.StdEncoding.EncodeToString([]byte("test-secret-value")),
+		PairedAt:     time.Now(),
+	}, store)
+	if err != nil {
+		t.Fatalf("AddPairedDevice() error: %v", err)
+	}
+
+	// Verify secret exists
+	_, err = store.Get(SharedSecretKey("mobile-1"))
+	if err != nil {
+		t.Fatalf("secret should exist before removal: %v", err)
+	}
+
+	// Remove the device
+	err = RemovePairedDevice(path, "mobile-1", store)
+	if err != nil {
+		t.Fatalf("RemovePairedDevice() error: %v", err)
+	}
+
+	// Verify secret is deleted
+	_, err = store.Get(SharedSecretKey("mobile-1"))
+	if err == nil {
+		t.Error("expected error after secret deletion, got nil")
+	}
+
+	// Verify device list is empty
+	devices, _ := LoadPairedDevices(path, store)
+	if len(devices) != 0 {
+		t.Errorf("expected 0 devices after removal, got %d", len(devices))
+	}
+}

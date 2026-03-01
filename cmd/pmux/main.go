@@ -344,13 +344,25 @@ func handlePair() {
 			return
 		}
 
-		if err := auth.SavePairedDevices(pairedDevicesPath, nil); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to clear paired devices: %v\n", err)
+		if err := auth.RemovePairedDevice(pairedDevicesPath, existingDevice.DeviceID, store); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to remove paired device: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
 	serverURL := cfg.ServerURL()
+
+	// Warn if using unencrypted HTTP for non-local server
+	if strings.HasPrefix(serverURL, "http://") || strings.HasPrefix(serverURL, "ws://") {
+		host := strings.TrimPrefix(strings.TrimPrefix(serverURL, "http://"), "ws://")
+		host = strings.Split(host, "/")[0] // strip path
+		host = strings.Split(host, ":")[0] // strip port
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			fmt.Fprintf(os.Stderr, "WARNING: Server URL %q uses unencrypted HTTP.\n", serverURL)
+			fmt.Fprintf(os.Stderr, "  Pairing data (public keys, device IDs) will be sent in cleartext.\n")
+			fmt.Fprintf(os.Stderr, "  Use https:// for production servers.\n\n")
+		}
+	}
 
 	// Generate X25519 ephemeral keypair for key exchange
 	x25519kp, err := auth.GenerateX25519Keypair()
