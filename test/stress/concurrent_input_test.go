@@ -25,7 +25,7 @@ func TestConcurrentInput_TwoPeers(t *testing.T) {
 
 	tc := tmux.NewClient(concurrentSocket)
 	catcher := &messageCatcher{}
-	h := agent.NewHandler(tc, catcher.Send, func(data []byte) {}, newTestLogger())
+	h := agent.NewHandler(tc, catcher.Send, newTestLogger())
 
 	// Create two separate sessions for isolation
 	_, err := tc.CreateSession("concurrent-1", "")

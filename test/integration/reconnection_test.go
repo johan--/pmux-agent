@@ -31,7 +31,8 @@ type signalingMessage struct {
 func testIdentity(t *testing.T) *auth.Identity {
 	t.Helper()
 	keysDir := t.TempDir()
-	id, err := auth.GenerateIdentity(keysDir)
+	store := auth.NewMemorySecretStore()
+	id, err := auth.GenerateIdentity(keysDir, store)
 	if err != nil {
 		t.Fatalf("GenerateIdentity: %v", err)
 	}

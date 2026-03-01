@@ -132,7 +132,7 @@ func TestLifecycle_FullCycle(t *testing.T) {
 
 	tc := tmux.NewClient(lifecycleSocket)
 	catcher := &messageCatcher{}
-	h := agent.NewHandler(tc, catcher.Send, func(data []byte) {}, newTestLogger())
+	h := agent.NewHandler(tc, catcher.Send, newTestLogger())
 
 	// Allow runtime to stabilize before baseline measurement
 	runtime.GC()
@@ -271,81 +271,6 @@ func TestLifecycle_FullCycle(t *testing.T) {
 	}
 }
 
-// TestLifecycle_CreateAndKillSession verifies session creation and killing
-// through the protocol handler.
-func TestLifecycle_CreateAndKillSession(t *testing.T) {
-	skipIfNoTmux(t)
-	cleanupTmuxServer(t, lifecycleSocket)
-
-	tc := tmux.NewClient(lifecycleSocket)
-	catcher := &messageCatcher{}
-	h := agent.NewHandler(tc, catcher.Send, func(data []byte) {}, newTestLogger())
-
-	// Need at least one session running so the tmux server is alive
-	_, err := tc.CreateSession("anchor", "")
-	if err != nil {
-		t.Fatalf("CreateSession (anchor): %v", err)
-	}
-
-	// Create a session via protocol
-	name := "proto-created"
-	h.HandleMessage("peer1", &protocol.CreateSessionRequest{
-		Type: "create_session",
-		Name: &name,
-	})
-
-	msg := catcher.waitFor(t, "session_created", 3*time.Second)
-	created, ok := msg.(*protocol.SessionCreatedEvent)
-	if !ok {
-		t.Fatalf("expected SessionCreatedEvent, got %T", msg)
-	}
-	if created.Name != "proto-created" {
-		t.Errorf("name = %q, want proto-created", created.Name)
-	}
-
-	// Verify the session exists in tmux
-	sessions, err := tc.ListSessions()
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	found := false
-	for _, s := range sessions {
-		if s.Name == "proto-created" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("session 'proto-created' not found in tmux")
-	}
-
-	// Kill the session via protocol
-	catcher.reset()
-	h.HandleMessage("peer1", &protocol.KillSessionRequest{
-		Type:    "kill_session",
-		Session: "proto-created",
-	})
-
-	endedMsg := catcher.waitFor(t, "session_ended", 3*time.Second)
-	ended, ok := endedMsg.(*protocol.SessionEndedEvent)
-	if !ok {
-		t.Fatalf("expected SessionEndedEvent, got %T", endedMsg)
-	}
-	if ended.Session != "proto-created" {
-		t.Errorf("session = %q, want proto-created", ended.Session)
-	}
-
-	// Verify session is gone
-	sessions, err = tc.ListSessions()
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
-	}
-	for _, s := range sessions {
-		if s.Name == "proto-created" {
-			t.Error("killed session should not appear in list")
-		}
-	}
-}
-
 // TestLifecycle_PingPong verifies the ping/pong latency measurement flow.
 func TestLifecycle_PingPong(t *testing.T) {
 	skipIfNoTmux(t)
@@ -353,7 +278,7 @@ func TestLifecycle_PingPong(t *testing.T) {
 
 	tc := tmux.NewClient(lifecycleSocket)
 	catcher := &messageCatcher{}
-	h := agent.NewHandler(tc, catcher.Send, func(data []byte) {}, newTestLogger())
+	h := agent.NewHandler(tc, catcher.Send, newTestLogger())
 
 	// Send a ping
 	h.HandleMessage("peer1", &protocol.PingRequest{Type: "ping"})
@@ -382,46 +307,6 @@ func TestLifecycle_PingPong(t *testing.T) {
 	}
 }
 
-// TestLifecycle_BroadcastEmptySessions verifies that the broadcast function
-// sends an empty sessions event.
-func TestLifecycle_BroadcastEmptySessions(t *testing.T) {
-	var mu sync.Mutex
-	var broadcastData []byte
-
-	tc := tmux.NewClient("pmux-broadcast-integ")
-	h := agent.NewHandler(tc, func(peerID string, msg protocol.Message) error {
-		return nil
-	}, func(data []byte) {
-		mu.Lock()
-		broadcastData = make([]byte, len(data))
-		copy(broadcastData, data)
-		mu.Unlock()
-	}, newTestLogger())
-
-	h.BroadcastEmptySessions()
-
-	mu.Lock()
-	data := broadcastData
-	mu.Unlock()
-
-	if data == nil {
-		t.Fatal("expected broadcast data to be non-nil")
-	}
-
-	msg, err := protocol.Decode(data)
-	if err != nil {
-		t.Fatalf("failed to decode broadcast: %v", err)
-	}
-
-	sessionsEvt, ok := msg.(*protocol.SessionsEvent)
-	if !ok {
-		t.Fatalf("expected SessionsEvent, got %T", msg)
-	}
-	if len(sessionsEvt.Sessions) != 0 {
-		t.Errorf("expected 0 sessions, got %d", len(sessionsEvt.Sessions))
-	}
-}
-
 // TestLifecycle_ReattachAfterDetach verifies that a peer can detach and
 // re-attach to a different pane without issues.
 func TestLifecycle_ReattachAfterDetach(t *testing.T) {
@@ -430,7 +315,7 @@ func TestLifecycle_ReattachAfterDetach(t *testing.T) {
 
 	tc := tmux.NewClient(lifecycleSocket)
 	catcher := &messageCatcher{}
-	h := agent.NewHandler(tc, catcher.Send, func(data []byte) {}, newTestLogger())
+	h := agent.NewHandler(tc, catcher.Send, newTestLogger())
 
 	// Create two sessions
 	_, err := tc.CreateSession("reattach-1", "")

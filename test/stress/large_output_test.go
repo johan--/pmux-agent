@@ -23,7 +23,7 @@ func TestLargeOutput_10MB(t *testing.T) {
 
 	tc := tmux.NewClient(outputSocket)
 	catcher := &messageCatcher{}
-	h := agent.NewHandler(tc, catcher.Send, func(data []byte) {}, newTestLogger())
+	h := agent.NewHandler(tc, catcher.Send, newTestLogger())
 
 	// Create a session for the test
 	_, err := tc.CreateSession("large-output", "")
