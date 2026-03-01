@@ -3,14 +3,67 @@ package agent
 import (
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/shiftinbits/pmux-agent/internal/auth"
+	"github.com/shiftinbits/pmux-agent/internal/protocol"
+	"github.com/shiftinbits/pmux-agent/internal/service"
 )
 
-// RunStatus shows the paired mobile device, or a hint to pair if none.
-func RunStatus(pairedDevicesPath string, store auth.SecretStore, w io.Writer) error {
-	device, err := auth.LoadPairedDevice(pairedDevicesPath, store)
+// SessionLister abstracts tmux session listing for testability.
+// tmux.Client satisfies this interface.
+type SessionLister interface {
+	ListSessions() ([]protocol.TmuxSession, error)
+}
+
+// StatusParams holds all dependencies for the RunStatus command.
+type StatusParams struct {
+	PairedDevicesPath string
+	Store             auth.SecretStore
+	PIDFilePath       string
+	ServiceManager    service.Manager // nil-safe: treated as "not installed"
+	Sessions          SessionLister   // nil-safe: treated as 0 sessions
+}
+
+// RunStatus shows a comprehensive status overview: agent process, service
+// registration, tmux session count, and paired mobile device info.
+func RunStatus(params StatusParams, w io.Writer) error {
+	// --- Agent process status ---
+	agentLine := "not running"
+	if params.PIDFilePath != "" {
+		if pid, err := ReadPIDFile(params.PIDFilePath); err == nil {
+			if IsProcessRunning(pid) {
+				agentLine = fmt.Sprintf("running (PID %d)", pid)
+			} else {
+				CleanStalePIDFile(params.PIDFilePath)
+			}
+		}
+	}
+	fmt.Fprintf(w, "Agent:    %s\n", agentLine)
+
+	// --- Service status ---
+	serviceLine := "not installed"
+	if params.ServiceManager != nil && params.ServiceManager.IsInstalled() {
+		serviceLine = "installed"
+	}
+	fmt.Fprintf(w, "Service:  %s\n", serviceLine)
+
+	// --- tmux sessions ---
+	sessionLine := "0"
+	if params.Sessions != nil {
+		sessions, err := params.Sessions.ListSessions()
+		if err != nil {
+			sessionLine = "unknown"
+		} else {
+			sessionLine = fmt.Sprintf("%d", len(sessions))
+		}
+	}
+	fmt.Fprintf(w, "Sessions: %s\n", sessionLine)
+
+	// --- Blank separator ---
+	fmt.Fprintln(w)
+
+	// --- Paired device ---
+	device, err := auth.LoadPairedDevice(params.PairedDevicesPath, params.Store)
 	if err != nil {
 		return fmt.Errorf("load paired device: %w", err)
 	}
@@ -20,28 +73,18 @@ func RunStatus(pairedDevicesPath string, store auth.SecretStore, w io.Writer) er
 		return nil
 	}
 
-	name := device.Name
-	if name == "" {
-		name = device.DeviceID
-		if len(name) > 12 {
-			name = name[:12] + "..."
-		}
-	}
-
 	deviceIDShort := device.DeviceID
 	if len(deviceIDShort) > 12 {
 		deviceIDShort = deviceIDShort[:12] + "..."
 	}
 
-	lastSeen := "never"
-	if device.LastSeen > 0 {
-		lastSeen = time.Unix(device.LastSeen, 0).Format("2006-01-02 15:04")
+	if device.Name != "" {
+		fmt.Fprintf(w, "Paired device: %s\n", device.Name)
+		fmt.Fprintf(w, "  Device ID:  %s\n", deviceIDShort)
+	} else {
+		fmt.Fprintf(w, "Paired device: %s\n", deviceIDShort)
 	}
-
-	fmt.Fprintf(w, "Paired device: %s\n", name)
-	fmt.Fprintf(w, "  Device ID:  %s\n", deviceIDShort)
 	fmt.Fprintf(w, "  Paired:     %s\n", device.PairedAt.Format("2006-01-02"))
-	fmt.Fprintf(w, "  Last seen:  %s\n", lastSeen)
 
 	return nil
 }

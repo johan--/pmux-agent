@@ -22,6 +22,7 @@ import (
 	"github.com/shiftinbits/pmux-agent/internal/config"
 	"github.com/shiftinbits/pmux-agent/internal/proxy"
 	"github.com/shiftinbits/pmux-agent/internal/service"
+	"github.com/shiftinbits/pmux-agent/internal/tmux"
 )
 
 const version = "0.1.0-dev"
@@ -469,7 +470,19 @@ func handleStatus() {
 		os.Exit(1)
 	}
 
-	if err := agent.RunStatus(paths.PairedDevices, store, os.Stdout); err != nil {
+	exe, _ := os.Executable()
+	mgr := service.NewManager(exe, paths.ConfigDir)
+	tmuxClient := tmux.NewClient(cfg.Tmux.SocketName)
+
+	params := agent.StatusParams{
+		PairedDevicesPath: paths.PairedDevices,
+		Store:             store,
+		PIDFilePath:       agent.PIDFilePath(paths),
+		ServiceManager:    mgr,
+		Sessions:          tmuxClient,
+	}
+
+	if err := agent.RunStatus(params, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
@@ -764,7 +777,7 @@ PocketMux commands:
   init              Generate identity and configure agent
   pair              Pair with a mobile device (displays QR code)
   config            Show effective configuration with sources
-  status            Show paired mobile device
+  status            Show agent, service, and pairing status
   unpair            Remove the paired mobile device
   agent run         Run the agent in the foreground
   agent start       Start the agent
