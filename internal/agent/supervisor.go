@@ -11,6 +11,7 @@ import (
 
 	"github.com/shiftinbits/pmux-agent/internal/auth"
 	"github.com/shiftinbits/pmux-agent/internal/config"
+	"github.com/shiftinbits/pmux-agent/internal/service"
 )
 
 const (
@@ -31,7 +32,8 @@ func signalActivity(pid int) {
 // EnsureRunning checks if the agent is already running and starts it if not.
 // Returns nil if the agent is running (or was started successfully).
 // Does nothing if no identity exists (agent can't authenticate without one).
-func EnsureRunning(paths config.Paths, store auth.SecretStore) error {
+// If mgr is non-nil and a service is installed, tries the service manager first.
+func EnsureRunning(paths config.Paths, store auth.SecretStore, mgr service.Manager) error {
 	// No identity — agent can't authenticate
 	if !auth.HasIdentity(paths.KeysDir, store) {
 		return nil
@@ -48,7 +50,37 @@ func EnsureRunning(paths config.Paths, store auth.SecretStore) error {
 		return nil
 	}
 
+	// Try service manager first
+	if mgr != nil && mgr.IsInstalled() {
+		if err := mgr.Start(); err == nil {
+			// Wait briefly for agent to write PID file
+			if waitForPID(pidFile, 3*time.Second) {
+				return nil
+			}
+		}
+		// Fall through to direct spawn if service start failed
+	}
+
 	return spawn(pidFile)
+}
+
+// waitForPID polls for the PID file to appear and contain a running process.
+func waitForPID(pidFile string, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			return false
+		case <-ticker.C:
+			pid, err := ReadPIDFile(pidFile)
+			if err == nil && IsProcessRunning(pid) {
+				return true
+			}
+		}
+	}
 }
 
 // StopRunning stops the background agent if it is running.

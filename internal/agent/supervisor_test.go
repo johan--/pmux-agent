@@ -31,7 +31,7 @@ func TestEnsureRunning_NoIdentity(t *testing.T) {
 	store := auth.NewMemorySecretStore()
 
 	// No identity exists — EnsureRunning should be a no-op
-	err := EnsureRunning(paths, store)
+	err := EnsureRunning(paths, store, nil)
 	if err != nil {
 		t.Errorf("EnsureRunning should not error without identity: %v", err)
 	}

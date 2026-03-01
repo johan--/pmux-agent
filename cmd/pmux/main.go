@@ -111,7 +111,10 @@ func ensureAgent(cfg config.Config) {
 		return // Non-fatal: can't check identity without store
 	}
 
-	if err := agent.EnsureRunning(paths, store); err != nil {
+	exe, _ := os.Executable()
+	mgr := service.NewManager(exe, paths.ConfigDir)
+
+	if err := agent.EnsureRunning(paths, store, mgr); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to start agent: %v\n", err)
 	}
 }
@@ -671,7 +674,7 @@ func handleAgentStart() {
 		os.Exit(1)
 	}
 
-	if err := agent.EnsureRunning(paths, store); err != nil {
+	if err := agent.EnsureRunning(paths, store, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ failed to start agent: %v\n", err)
 		os.Exit(1)
 	}
