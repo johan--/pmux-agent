@@ -80,6 +80,7 @@ type PeerManager struct {
 	mu               sync.Mutex
 	peers            map[string]*Peer          // keyed by mobile device ID
 	disconnectTimers map[string]*time.Timer    // grace timers for disconnected peers
+	disconnectTimes  map[string]time.Time      // wall-clock time of disconnect (for sleep detection)
 	cleanupWg        sync.WaitGroup            // tracks background cleanup goroutines
 	closed           bool                       // true after CloseAll() returns
 	turnCache        []webrtc.ICEServer        // cached TURN credentials
@@ -110,6 +111,7 @@ func NewPeerManager(logger *slog.Logger, signaling MessageSender, serverURL stri
 		MaxPeers:         1,
 		peers:            make(map[string]*Peer),
 		disconnectTimers: make(map[string]*time.Timer),
+		disconnectTimes:  make(map[string]time.Time),
 	}
 }
 
@@ -139,6 +141,7 @@ func (pm *PeerManager) ClosePeer(deviceID string) {
 		timer.Stop()
 		delete(pm.disconnectTimers, deviceID)
 	}
+	delete(pm.disconnectTimes, deviceID)
 	peerCount := len(pm.peers)
 	pm.mu.Unlock()
 
@@ -169,6 +172,7 @@ func (pm *PeerManager) CloseAll() {
 		timer.Stop()
 		delete(pm.disconnectTimers, deviceID)
 	}
+	pm.disconnectTimes = make(map[string]time.Time)
 	pm.mu.Unlock()
 
 	for _, p := range peers {
@@ -415,6 +419,7 @@ func (pm *PeerManager) handleSDPAnswer(mobileDeviceID string, sdp string) {
 
 	if err := peer.conn.SetRemoteDescription(answer); err != nil {
 		pm.logger.Error("failed to set remote description", "error", err, "mobile", mobileDeviceID)
+		pm.ClosePeer(mobileDeviceID)
 		return
 	}
 
@@ -517,6 +522,7 @@ func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerC
 		if timer, ok := pm.disconnectTimers[deviceID]; ok {
 			timer.Stop()
 			delete(pm.disconnectTimers, deviceID)
+			delete(pm.disconnectTimes, deviceID)
 			pm.logger.Info("disconnect timer cancelled (connection recovered)", "mobile", deviceID)
 		}
 
@@ -529,6 +535,7 @@ func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerC
 		}
 		pm.logger.Info("peer disconnected, starting grace timer",
 			"mobile", deviceID, "timeout", pcDisconnectedTimeout)
+		pm.disconnectTimes[deviceID] = time.Now()
 		pm.disconnectTimers[deviceID] = time.AfterFunc(pcDisconnectedTimeout, func() {
 			pm.onDisconnectTimerFired(deviceID)
 		})
@@ -560,9 +567,12 @@ func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerC
 
 // onDisconnectTimerFired is called when the disconnect grace timer expires.
 // It checks whether the peer is still disconnected and attempts an ICE restart.
+// Uses wall-clock validation to detect timers that fired early after system sleep.
 func (pm *PeerManager) onDisconnectTimerFired(deviceID string) {
 	pm.mu.Lock()
 	delete(pm.disconnectTimers, deviceID)
+	disconnectTime, hasTime := pm.disconnectTimes[deviceID]
+	delete(pm.disconnectTimes, deviceID)
 	peer, ok := pm.peers[deviceID]
 	pm.mu.Unlock()
 
@@ -576,7 +586,22 @@ func (pm *PeerManager) onDisconnectTimerFired(deviceID string) {
 		return
 	}
 
-	pm.logger.Info("disconnect timer fired, attempting ICE restart", "mobile", deviceID)
+	// After system sleep, the monotonic timer fires immediately but actual
+	// disconnect may have been brief. Re-schedule if wall-clock time is insufficient.
+	if hasTime && time.Since(disconnectTime) < pcDisconnectedTimeout/2 {
+		pm.logger.Debug("disconnect timer fired early (system sleep?), rescheduling",
+			"mobile", deviceID, "elapsed", time.Since(disconnectTime))
+		remaining := pcDisconnectedTimeout - time.Since(disconnectTime)
+		pm.mu.Lock()
+		pm.disconnectTimes[deviceID] = disconnectTime
+		pm.disconnectTimers[deviceID] = time.AfterFunc(remaining, func() {
+			pm.onDisconnectTimerFired(deviceID)
+		})
+		pm.mu.Unlock()
+		return
+	}
+
+	pm.logger.Info("disconnect timer expired, attempting ICE restart", "mobile", deviceID)
 	pm.attemptICERestart(deviceID)
 }
 
@@ -595,13 +620,17 @@ func (pm *PeerManager) attemptICERestart(deviceID string) {
 	offer, err := peer.conn.CreateOffer(&webrtc.OfferOptions{ICERestart: true})
 	if err != nil {
 		pm.logger.Error("ICE restart: failed to create offer", "error", err, "mobile", deviceID)
+		pm.mu.Lock()
 		pm.scheduleCleanup(deviceID)
+		pm.mu.Unlock()
 		return
 	}
 
 	if err := peer.conn.SetLocalDescription(offer); err != nil {
 		pm.logger.Error("ICE restart: failed to set local description", "error", err, "mobile", deviceID)
+		pm.mu.Lock()
 		pm.scheduleCleanup(deviceID)
+		pm.mu.Unlock()
 		return
 	}
 
@@ -611,7 +640,9 @@ func (pm *PeerManager) attemptICERestart(deviceID string) {
 		SDP:            offer.SDP,
 	}); err != nil {
 		pm.logger.Error("ICE restart: failed to send SDP offer", "error", err, "mobile", deviceID)
+		pm.mu.Lock()
 		pm.scheduleCleanup(deviceID)
+		pm.mu.Unlock()
 		return
 	}
 
