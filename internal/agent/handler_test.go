@@ -447,16 +447,13 @@ func TestHandler_InputTooLarge(t *testing.T) {
 	largeData := make([]byte, maxInputSize+1)
 	h.HandleMessage("peer1", &protocol.InputRequest{Type: "input", Data: largeData})
 
-	msgs := catcher.get()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
-	}
-	errMsg, ok := msgs[0].Msg.(*protocol.ErrorEvent)
+	errMsg := catcher.waitFor(t, "error", 2*time.Second)
+	errEvent, ok := errMsg.(*protocol.ErrorEvent)
 	if !ok {
-		t.Fatalf("expected ErrorEvent, got %T", msgs[0].Msg)
+		t.Fatalf("expected ErrorEvent, got %T", errMsg)
 	}
-	if errMsg.Code != "input_too_large" {
-		t.Errorf("code = %q, want input_too_large", errMsg.Code)
+	if errEvent.Code != "input_too_large" {
+		t.Errorf("code = %q, want input_too_large", errEvent.Code)
 	}
 
 	h.HandleMessage("peer1", &protocol.DetachRequest{Type: "detach"})

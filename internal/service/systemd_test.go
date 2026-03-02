@@ -30,6 +30,12 @@ func TestSystemdManager_GenerateUnit(t *testing.T) {
 	if !strings.Contains(unit, "RestartSec=5s") {
 		t.Error("unit missing restart delay")
 	}
+	if !strings.Contains(unit, "StandardOutput=append:") {
+		t.Error("unit missing StandardOutput")
+	}
+	if !strings.Contains(unit, "StandardError=append:") {
+		t.Error("unit missing StandardError")
+	}
 }
 
 func TestSystemdManager_Install_WritesUnit(t *testing.T) {
