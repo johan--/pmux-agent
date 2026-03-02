@@ -46,6 +46,13 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
+// getPeer retrieves a peer from the PeerManager by device ID (test helper).
+func getPeer(pm *PeerManager, deviceID string) *Peer {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	return pm.peers[deviceID]
+}
+
 func mockTurnServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -801,7 +808,7 @@ func TestPeerManager_DisconnectedStartsGraceTimer(t *testing.T) {
 	}
 
 	// Simulate PeerConnectionStateDisconnected
-	pm.handlePeerStateChange("mobile-disc", webrtc.PeerConnectionStateDisconnected)
+	pm.handlePeerStateChange(getPeer(pm, "mobile-disc"), webrtc.PeerConnectionStateDisconnected)
 
 	pm.mu.Lock()
 	_, hasTimer := pm.disconnectTimers["mobile-disc"]
@@ -825,7 +832,7 @@ func TestPeerManager_ConnectedDuringGraceCancelsTimer(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Simulate disconnected → timer starts
-	pm.handlePeerStateChange("mobile-recover", webrtc.PeerConnectionStateDisconnected)
+	pm.handlePeerStateChange(getPeer(pm, "mobile-recover"), webrtc.PeerConnectionStateDisconnected)
 
 	pm.mu.Lock()
 	_, hasTimer := pm.disconnectTimers["mobile-recover"]
@@ -835,7 +842,7 @@ func TestPeerManager_ConnectedDuringGraceCancelsTimer(t *testing.T) {
 	}
 
 	// Simulate connected → timer should be cancelled
-	pm.handlePeerStateChange("mobile-recover", webrtc.PeerConnectionStateConnected)
+	pm.handlePeerStateChange(getPeer(pm, "mobile-recover"), webrtc.PeerConnectionStateConnected)
 
 	pm.mu.Lock()
 	_, hasTimerAfter := pm.disconnectTimers["mobile-recover"]
@@ -867,7 +874,7 @@ func TestPeerManager_FailedClosesPeerImmediately(t *testing.T) {
 	}
 
 	// Simulate failed state → peer should be closed via goroutine
-	pm.handlePeerStateChange("mobile-fail", webrtc.PeerConnectionStateFailed)
+	pm.handlePeerStateChange(getPeer(pm, "mobile-fail"), webrtc.PeerConnectionStateFailed)
 
 	// Give the goroutine time to run ClosePeer
 	time.Sleep(200 * time.Millisecond)
@@ -995,7 +1002,7 @@ func TestPeerManager_CloseAllCancelsDisconnectTimers(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Start a disconnect timer
-	pm.handlePeerStateChange("mobile-t1", webrtc.PeerConnectionStateDisconnected)
+	pm.handlePeerStateChange(getPeer(pm, "mobile-t1"), webrtc.PeerConnectionStateDisconnected)
 
 	pm.mu.Lock()
 	timerCount := len(pm.disconnectTimers)
@@ -1065,7 +1072,7 @@ func TestPeerManager_ClosePeerCancelsDisconnectTimer(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Start a disconnect timer
-	pm.handlePeerStateChange("mobile-cpt", webrtc.PeerConnectionStateDisconnected)
+	pm.handlePeerStateChange(getPeer(pm, "mobile-cpt"), webrtc.PeerConnectionStateDisconnected)
 
 	pm.mu.Lock()
 	_, hasTimer := pm.disconnectTimers["mobile-cpt"]
@@ -1112,7 +1119,7 @@ func TestPeerManager_OnPeerDisconnect_CalledOnFailure(t *testing.T) {
 	}
 
 	// Simulate failed state → should trigger OnPeerDisconnect
-	pm.handlePeerStateChange("mobile-fail", webrtc.PeerConnectionStateFailed)
+	pm.handlePeerStateChange(getPeer(pm, "mobile-fail"), webrtc.PeerConnectionStateFailed)
 	time.Sleep(500 * time.Millisecond)
 
 	disconnectedMu.Lock()

@@ -95,7 +95,7 @@ type Peer struct {
 	logger       *slog.Logger
 	signaling    MessageSender
 	handler      ProtocolHandler
-	stateHandler PeerStateHandler
+	stateHandler func(peer *Peer, state webrtc.PeerConnectionState)
 	mu           sync.Mutex
 	closed       bool
 }
@@ -510,9 +510,12 @@ func (pm *PeerManager) fetchTurnCredentials() ([]webrtc.ICEServer, error) {
 	return servers, nil
 }
 
-// handlePeerStateChange is the PeerStateHandler callback for managing disconnect
+// handlePeerStateChange is the state change callback for managing disconnect
 // timers, ICE restarts, and peer cleanup based on PeerConnection state transitions.
-func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerConnectionState) {
+// The peer parameter identifies which Peer fired the callback, preventing stale
+// callbacks from an old peer (during reconnect) from cleaning up the new peer.
+func (pm *PeerManager) handlePeerStateChange(peer *Peer, state webrtc.PeerConnectionState) {
+	deviceID := peer.DeviceID
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -547,8 +550,10 @@ func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerC
 			delete(pm.disconnectTimers, deviceID)
 		}
 		delete(pm.disconnectTimes, deviceID)
-		// Only notify if the peer is still tracked (avoids double-fire and WaitGroup race during CloseAll).
-		if _, ok := pm.peers[deviceID]; ok {
+		// Only cleanup if the tracked peer is the same one that fired.
+		// During reconnect, a stale callback from the old peer may fire after
+		// a new peer is stored under the same device ID.
+		if tracked, ok := pm.peers[deviceID]; ok && tracked == peer {
 			pm.logger.Info("peer connection failed, closing peer", "mobile", deviceID)
 			pm.scheduleCleanup(deviceID)
 		}
@@ -560,8 +565,10 @@ func (pm *PeerManager) handlePeerStateChange(deviceID string, state webrtc.PeerC
 			delete(pm.disconnectTimers, deviceID)
 		}
 		delete(pm.disconnectTimes, deviceID)
-		// Only notify if the peer is still tracked (avoids double-fire after Failed→Closed).
-		if _, ok := pm.peers[deviceID]; ok {
+		// Only cleanup if the tracked peer is the same one that fired.
+		// During reconnect, a stale callback from the old peer may fire after
+		// a new peer is stored under the same device ID.
+		if tracked, ok := pm.peers[deviceID]; ok && tracked == peer {
 			pm.scheduleCleanup(deviceID)
 		}
 	}
@@ -709,7 +716,7 @@ func (p *Peer) setupHandlers() {
 		// Notify the PeerManager of state changes for disconnect timer
 		// management and ICE restart logic.
 		if p.stateHandler != nil {
-			p.stateHandler(p.DeviceID, state)
+			p.stateHandler(p, state)
 		}
 	})
 }
