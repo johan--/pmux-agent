@@ -277,6 +277,11 @@ func (sc *SignalingClient) connectAndServe(ctx context.Context) (connected bool,
 
 	// Authenticate
 	if err := sc.authenticate(conn); err != nil {
+		// Invalidate cached JWT so the next reconnect attempt forces a
+		// fresh token exchange instead of reusing a rejected token.
+		sc.mu.Lock()
+		sc.jwtExpiry = time.Time{}
+		sc.mu.Unlock()
 		return false, err
 	}
 
@@ -344,9 +349,11 @@ func (sc *SignalingClient) ensureToken() error {
 	defer sc.mu.Unlock()
 
 	if sc.jwt != "" && time.Until(sc.jwtExpiry) > TokenRefreshMargin {
+		sc.logger.Debug("using cached JWT", "expiresIn", time.Until(sc.jwtExpiry).Round(time.Second))
 		return nil
 	}
 
+	sc.logger.Info("exchanging new JWT")
 	token, err := auth.ExchangeToken(sc.identity, sc.serverURL, sc.HTTPClient)
 	if err != nil {
 		return err
