@@ -50,6 +50,28 @@ func TestRoundTripAttach(t *testing.T) {
 	}
 }
 
+func TestRoundTripAttachReattach(t *testing.T) {
+	msg := &AttachRequest{Type: "attach", PaneID: "%3", Cols: 120, Rows: 40, Reattach: true}
+	data, err := Encode(msg)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := Decode(data)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got, ok := decoded.(*AttachRequest)
+	if !ok {
+		t.Fatalf("expected *AttachRequest, got %T", decoded)
+	}
+	if got.PaneID != "%3" || got.Cols != 120 || got.Rows != 40 {
+		t.Errorf("got %+v, want paneId=%%3 cols=120 rows=40", got)
+	}
+	if !got.Reattach {
+		t.Error("expected Reattach=true, got false")
+	}
+}
+
 func TestRoundTripDetach(t *testing.T) {
 	msg := &DetachRequest{Type: "detach"}
 	data, err := Encode(msg)
@@ -500,6 +522,7 @@ type fixtureJSON struct {
 	PaneID         string        `json:"paneId,omitempty"`
 	Cols           *int          `json:"cols,omitempty"`
 	Rows           *int          `json:"rows,omitempty"`
+	Reattach       *bool         `json:"reattach,omitempty"`
 	Data           []int         `json:"data,omitempty"`
 	Name           *string       `json:"name,omitempty"`
 	Command        *string       `json:"command,omitempty"`
@@ -583,6 +606,9 @@ func verifyFixtureFields(t *testing.T, msg Message, expected fixtureJSON) {
 		}
 		if expected.Rows != nil && m.Rows != *expected.Rows {
 			t.Errorf("rows = %d, want %d", m.Rows, *expected.Rows)
+		}
+		if expected.Reattach != nil && m.Reattach != *expected.Reattach {
+			t.Errorf("reattach = %v, want %v", m.Reattach, *expected.Reattach)
 		}
 
 	case *InputRequest:

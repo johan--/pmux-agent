@@ -20,10 +20,11 @@ func (m *ListSessionsRequest) MessageType() string { return "list_sessions" }
 
 // AttachRequest attaches to a specific pane with the given terminal dimensions.
 type AttachRequest struct {
-	Type   string `msgpack:"type"`
-	PaneID string `msgpack:"paneId"`
-	Cols   int    `msgpack:"cols"`
-	Rows   int    `msgpack:"rows"`
+	Type     string `msgpack:"type"`
+	PaneID   string `msgpack:"paneId"`
+	Cols     int    `msgpack:"cols"`
+	Rows     int    `msgpack:"rows"`
+	Reattach bool   `msgpack:"reattach,omitempty"`
 }
 
 func (m *AttachRequest) MessageType() string { return "attach" }
