@@ -25,7 +25,7 @@ import (
 	"github.com/shiftinbits/pmux-agent/internal/tmux"
 )
 
-const version = "0.1.0-dev"
+var version = "dev"
 
 // loadEffectiveConfig loads the config from disk with env overrides.
 // Returns a usable config even if the config file doesn't exist.
