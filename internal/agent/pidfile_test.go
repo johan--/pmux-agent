@@ -266,6 +266,24 @@ func TestCleanStalePIDFile_EmptyFile(t *testing.T) {
 	}
 }
 
+func TestWritePIDFile_AtomicNoTmpResidue(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "agent.pid")
+	if err := WritePIDFile(pidFile); err != nil {
+		t.Fatalf("WritePIDFile: %v", err)
+	}
+	if _, err := os.Stat(pidFile + ".tmp"); !os.IsNotExist(err) {
+		t.Error("temporary file should not remain after successful write")
+	}
+	pid, err := ReadPIDFile(pidFile)
+	if err != nil {
+		t.Fatalf("ReadPIDFile: %v", err)
+	}
+	if pid != os.Getpid() {
+		t.Errorf("PID = %d, want %d", pid, os.Getpid())
+	}
+}
+
 func TestWritePIDFile_OverwritesExisting(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "agent.pid")

@@ -177,6 +177,7 @@ func runAgent(cpuProfile, memProfile string) {
 		// These won't self-resolve, so exit 0 to prevent restart loops.
 		if agent.IsFatalInitError(agentErr) {
 			fmt.Fprintf(os.Stderr, "fatal: %v\n", agentErr)
+			agent.RemovePIDFile(agent.PIDFilePath(paths))
 			os.Exit(0)
 		}
 		// Runtime errors: exit 1 so service manager restarts us.

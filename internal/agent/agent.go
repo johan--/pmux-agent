@@ -64,6 +64,12 @@ func Run(ctx context.Context, paths config.Paths) error {
 		// Non-fatal: agent can still run, just harder to manage
 	}
 
+	// Register SIGUSR1 handler early — before any initialization that could
+	// delay startup. The channel is buffered so signals received before the
+	// goroutine starts reading are not lost.
+	usr1Ch := make(chan os.Signal, 1)
+	signal.Notify(usr1Ch, syscall.SIGUSR1)
+
 	// Load config for server URL, socket name, and timing settings
 	cfg, err := config.LoadConfig(paths.ConfigFile)
 	if err != nil {
@@ -131,8 +137,7 @@ func Run(ctx context.Context, paths config.Paths) error {
 	// Handle SIGUSR1 to wake signaling client from dormancy.
 	// The supervisor sends SIGUSR1 on every pmux CLI invocation so that a
 	// dormant agent resumes reconnection without requiring a manual restart.
-	usr1Ch := make(chan os.Signal, 1)
-	signal.Notify(usr1Ch, syscall.SIGUSR1)
+	// (usr1Ch was registered early, right after PID file write, so no signals are lost.)
 	go func() {
 		for {
 			select {

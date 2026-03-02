@@ -150,7 +150,15 @@ func spawn(pidFile string) error {
 	cmd := exec.Command(exe, "agent", "run")
 	cmd.Stdin = nil
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Redirect stderr to agent log so early startup errors (before the
+	// agent opens its own log handler) are captured for debugging.
+	logPath := filepath.Join(filepath.Dir(pidFile), "agent.log")
+	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
+		cmd.Stderr = logFile
+		// logFile fd is inherited by the child; closed when child exits.
+	} else {
+		cmd.Stderr = nil
+	}
 	// Start in a new session so it's not tied to the calling terminal
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 

@@ -16,11 +16,17 @@ const (
 	pidFilePerms = 0600
 )
 
-// WritePIDFile writes the current process PID to the given path with 0600 permissions.
+// WritePIDFile writes the current process PID to the given path atomically.
+// Uses write-to-tmp + rename to prevent partial reads by concurrent processes.
 func WritePIDFile(path string) error {
 	pid := os.Getpid()
-	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)), pidFilePerms); err != nil {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strconv.Itoa(pid)), pidFilePerms); err != nil {
 		return fmt.Errorf("write PID file %s: %w", path, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp) //nolint:errcheck
+		return fmt.Errorf("rename PID file %s: %w", path, err)
 	}
 	return nil
 }
