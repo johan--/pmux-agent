@@ -19,8 +19,12 @@ pmux split-window -h          # split pane — every tmux command works
 ## PocketMux-Only Commands
 
 ```bash
-pmux init     # one-time: generate identity and register
-pmux pair     # pair with mobile device (displays QR code)
+pmux init       # one-time: generate identity, install service
+pmux pair       # pair with mobile device (displays QR code)
+pmux status     # show agent, service, and pairing status
+pmux config     # show effective configuration with sources
+pmux unpair     # remove paired mobile device
+pmux agent      # manage the background agent (start/stop/install/uninstall)
 ```
 
 ## Installation
