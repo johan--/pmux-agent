@@ -2,7 +2,6 @@ package auth
 
 import (
 	"fmt"
-	"log/slog"
 )
 
 const (
@@ -30,29 +29,18 @@ func NewSecretStore(keysDir string, backendPref string) (SecretStore, error) {
 		if err := ProbeKeyring(); err != nil {
 			return nil, fmt.Errorf("keyring backend requested but unavailable: %w", err)
 		}
-		store := NewKeyringSecretStore()
-		slog.Info("secret store initialized", "backend", store.Backend())
-		return store, nil
+		return NewKeyringSecretStore(), nil
 
 	case BackendFile:
-		store := NewFileSecretStore(keysDir)
-		slog.Info("secret store initialized", "backend", store.Backend())
-		return store, nil
+		return NewFileSecretStore(keysDir), nil
 
 	case BackendAuto, "":
 		// Try keyring first
 		if err := ProbeKeyring(); err == nil {
-			store := NewKeyringSecretStore()
-			slog.Info("secret store initialized", "backend", store.Backend())
-			return store, nil
+			return NewKeyringSecretStore(), nil
 		}
 		// Fall back to encrypted file
-		store := NewFileSecretStore(keysDir)
-		slog.Info("secret store initialized",
-			"backend", store.Backend(),
-			"reason", "system keyring unavailable, using encrypted file",
-		)
-		return store, nil
+		return NewFileSecretStore(keysDir), nil
 
 	default:
 		return nil, fmt.Errorf("unknown secret backend: %q (use %q, %q, or %q)",
