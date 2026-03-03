@@ -356,7 +356,8 @@ func TestHandler_KillSession(t *testing.T) {
 func TestHandler_AttachInvalidPane(t *testing.T) {
 	h, _, catcher := testHandler(t)
 
-	// Attach to a non-existent pane
+	// Attach to a non-existent pane — should send pane_closed + sessions
+	// (not a generic attach_failed) so the mobile can navigate away.
 	h.HandleMessage("peer1", &protocol.AttachRequest{
 		Type:   "attach",
 		PaneID: "%999",
@@ -365,15 +366,18 @@ func TestHandler_AttachInvalidPane(t *testing.T) {
 	})
 
 	msgs := catcher.get()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (pane_closed + sessions), got %d", len(msgs))
 	}
-	errMsg, ok := msgs[0].Msg.(*protocol.ErrorEvent)
+	pcMsg, ok := msgs[0].Msg.(*protocol.PaneClosedEvent)
 	if !ok {
-		t.Fatalf("expected ErrorEvent, got %T", msgs[0].Msg)
+		t.Fatalf("expected PaneClosedEvent, got %T", msgs[0].Msg)
 	}
-	if errMsg.Code != "attach_failed" {
-		t.Errorf("code = %q, want attach_failed", errMsg.Code)
+	if pcMsg.PaneID != "%999" {
+		t.Errorf("pane_closed paneId = %q, want %%999", pcMsg.PaneID)
+	}
+	if _, ok := msgs[1].Msg.(*protocol.SessionsEvent); !ok {
+		t.Errorf("expected SessionsEvent as second message, got %T", msgs[1].Msg)
 	}
 }
 
@@ -667,6 +671,84 @@ func TestHandler_PaneClosedOnExit(t *testing.T) {
 	if bridge != nil {
 		t.Error("expected bridge to be nil after pane exit")
 	}
+}
+
+// TestHandler_ListSessionsDetectsClosedPane verifies that list_sessions sends
+// pane_closed when the attached pane is no longer in the session tree.
+// This is the safety net for pane closures missed by watchPane (e.g., during
+// connection gaps).
+func TestHandler_ListSessionsDetectsClosedPane(t *testing.T) {
+	h, tc, catcher := testHandler(t)
+
+	// Create two sessions — second keeps tmux alive
+	_, err := tc.CreateSession("ls-test", "")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	_, err = tc.CreateSession("ls-keepalive", "")
+	if err != nil {
+		t.Fatalf("CreateSession (keepalive): %v", err)
+	}
+
+	sessions, err := tc.ListAll()
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+
+	var paneID string
+	for _, s := range sessions {
+		if s.Name == "ls-test" {
+			paneID = s.Windows[0].Panes[0].ID
+			break
+		}
+	}
+	if paneID == "" {
+		t.Fatal("could not find pane for ls-test")
+	}
+
+	// Attach to the pane
+	h.HandleMessage("peer1", &protocol.AttachRequest{
+		Type:   "attach",
+		PaneID: paneID,
+		Cols:   80,
+		Rows:   24,
+	})
+	catcher.waitFor(t, "attached", 2*time.Second)
+
+	// Kill the pane directly (simulating closure during connection gap)
+	exec.Command("tmux", "-L", handlerTestSocket, "kill-pane", "-t", paneID).Run() //nolint:errcheck
+	time.Sleep(100 * time.Millisecond)
+
+	// Cancel the streamOutput context to simulate what happens during reconnection
+	// (PeerDisconnected kills goroutines but doesn't send pane_closed)
+	h.mu.Lock()
+	cancel := h.cancels["peer1"]
+	h.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Clear messages from attach/watchPane
+	catcher.mu.Lock()
+	catcher.messages = nil
+	catcher.mu.Unlock()
+
+	// Now call list_sessions — should detect the attached pane is gone
+	h.HandleMessage("peer1", &protocol.ListSessionsRequest{Type: "list_sessions"})
+
+	// Should get pane_closed before sessions
+	paneClosed := catcher.waitFor(t, "pane_closed", 2*time.Second)
+	paneClosedEvent, ok := paneClosed.(*protocol.PaneClosedEvent)
+	if !ok {
+		t.Fatalf("expected PaneClosedEvent, got %T", paneClosed)
+	}
+	if paneClosedEvent.PaneID != paneID {
+		t.Errorf("paneId = %q, want %q", paneClosedEvent.PaneID, paneID)
+	}
+
+	// Should also get sessions
+	catcher.waitFor(t, "sessions", 2*time.Second)
 }
 
 // TestHandler_GoroutineLeak verifies that repeated connect/attach/detach/disconnect

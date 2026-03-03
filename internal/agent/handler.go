@@ -145,6 +145,43 @@ func (h *Handler) handleListSessions(peerID string) {
 		"panes", totalPanes,
 	)
 
+	// Safety net: if the peer is attached to a pane that no longer exists
+	// in the session tree, send pane_closed before the sessions response.
+	// This catches cases where the pane closed during a connection gap and
+	// watchPane was killed by context cancellation before detecting it.
+	h.mu.Lock()
+	attachedPane := h.paneForPeer[peerID]
+	h.mu.Unlock()
+
+	if attachedPane != "" {
+		found := false
+		for _, s := range sessions {
+			for _, w := range s.Windows {
+				for _, p := range w.Panes {
+					if p.ID == attachedPane {
+						found = true
+						break
+					}
+				}
+				if found {
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			h.logger.Info("attached pane missing from session tree, sending pane_closed",
+				"peer", peerID, "pane", attachedPane)
+			h.sendMsg(peerID, &protocol.PaneClosedEvent{
+				Type:   "pane_closed",
+				PaneID: attachedPane,
+			})
+			h.detachPeer(peerID)
+		}
+	}
+
 	if err := h.sendMsg(peerID, &protocol.SessionsEvent{
 		Type:     "sessions",
 		Sessions: sessions,
@@ -154,6 +191,8 @@ func (h *Handler) handleListSessions(peerID string) {
 }
 
 func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
+	h.logger.Debug("attach requested", "peer", peerID, "pane", req.PaneID, "reattach", req.Reattach)
+
 	// Validate pane ID format before passing to tmux CLI.
 	if !validTmuxTarget.MatchString(req.PaneID) {
 		h.sendError(peerID, "attach_failed", fmt.Sprintf("invalid pane ID: %q", req.PaneID))
@@ -193,6 +232,25 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 			}
 		}
 		h.logger.Debug("attach pane failed", "peer", peerID, "pane", req.PaneID, "error", err)
+
+		// If the pane no longer exists, send pane_closed + fresh sessions
+		// instead of a generic attach_failed. This handles the case where a
+		// pane closed during a connection gap and the mobile tries to re-attach.
+		if !h.tmux.PaneExists(req.PaneID) {
+			h.logger.Info("pane no longer exists on attach attempt, sending pane_closed", "peer", peerID, "pane", req.PaneID)
+			h.sendMsg(peerID, &protocol.PaneClosedEvent{
+				Type:   "pane_closed",
+				PaneID: req.PaneID,
+			})
+			if sessions, listErr := h.tmux.ListAll(); listErr == nil {
+				h.sendMsg(peerID, &protocol.SessionsEvent{
+					Type:     "sessions",
+					Sessions: sessions,
+				})
+			}
+			return
+		}
+
 		h.sendError(peerID, "attach_failed", "failed to attach pane")
 		return
 	}
@@ -379,20 +437,28 @@ func (h *Handler) handlePaneExit(peerID string) {
 	h.logger.Info("pane exited, notifying peer", "peer", peerID, "pane", paneID)
 
 	// Send pane_closed event
-	h.sendMsg(peerID, &protocol.PaneClosedEvent{
+	if err := h.sendMsg(peerID, &protocol.PaneClosedEvent{
 		Type:   "pane_closed",
 		PaneID: paneID,
-	})
+	}); err != nil {
+		h.logger.Error("failed to send pane_closed", "peer", peerID, "pane", paneID, "error", err)
+	} else {
+		h.logger.Info("sent pane_closed", "peer", peerID, "pane", paneID)
+	}
 
 	// Send fresh session tree so mobile can navigate to the new active pane
 	sessions, err := h.tmux.ListAll()
 	if err != nil {
 		h.logger.Warn("failed to list sessions after pane close", "error", err)
 	} else {
-		h.sendMsg(peerID, &protocol.SessionsEvent{
+		if err := h.sendMsg(peerID, &protocol.SessionsEvent{
 			Type:     "sessions",
 			Sessions: sessions,
-		})
+		}); err != nil {
+			h.logger.Error("failed to send sessions after pane close", "peer", peerID, "error", err)
+		} else {
+			h.logger.Info("sent sessions after pane close", "peer", peerID, "sessionCount", len(sessions))
+		}
 	}
 
 	// Clean up bridge and state
@@ -404,15 +470,18 @@ func (h *Handler) handlePaneExit(peerID string) {
 // handlePaneExit to notify the mobile client. This is needed because the
 // PaneBridge FIFO uses O_RDWR and never returns EOF on pane closure.
 func (h *Handler) watchPane(ctx context.Context, peerID, paneID string) {
+	h.logger.Debug("watchPane started", "peer", peerID, "pane", paneID)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
+			h.logger.Debug("watchPane stopped (context canceled)", "peer", peerID, "pane", paneID)
 			return
 		case <-ticker.C:
 			if !h.tmux.PaneExists(paneID) {
+				h.logger.Info("watchPane: pane no longer exists, triggering handlePaneExit", "peer", peerID, "pane", paneID)
 				h.handlePaneExit(peerID)
 				return
 			}
