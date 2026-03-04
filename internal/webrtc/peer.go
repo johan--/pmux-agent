@@ -24,6 +24,16 @@ const DataChannelLabel = "terminal"
 // fires the OnBufferedAmountLow callback, enabling backpressure-aware sending.
 const bufferedAmountLowThreshold = 4096
 
+// maxBufferedAmount is the byte threshold above which SendRaw/SendMessage
+// block waiting for the buffer to drain. 512KB is generous for terminal data
+// (typically kilobytes) while preventing unbounded growth.
+const maxBufferedAmount = 512 * 1024
+
+// sendReadyTimeout is the maximum time to wait for the DataChannel buffer
+// to drain before returning an error. Prevents permanent deadlock if the
+// connection is lost while waiting.
+const sendReadyTimeout = 5 * time.Second
+
 // pcDisconnectedTimeout is how long to wait after a PeerConnection enters
 // the "disconnected" state before attempting an ICE restart. This grace period
 // allows transient network interruptions to recover without intervention.
@@ -96,8 +106,10 @@ type Peer struct {
 	signaling    MessageSender
 	handler      ProtocolHandler
 	stateHandler func(peer *Peer, state webrtc.PeerConnectionState)
-	mu           sync.Mutex
-	closed       bool
+	mu        sync.Mutex
+	closed    bool
+	sendReady chan struct{} // signaled by OnBufferedAmountLow when buffer drains
+	done      chan struct{} // closed by Close() to unblock waitForSendReady
 }
 
 // NewPeerManager creates a manager for WebRTC peer connections.
@@ -336,6 +348,8 @@ func (pm *PeerManager) handleConnectRequest(mobileDeviceID string) {
 		signaling:    pm.signaling,
 		handler:      pm.handler,
 		stateHandler: pm.handlePeerStateChange,
+		sendReady:    make(chan struct{}, 1),
+		done:         make(chan struct{}),
 	}
 
 	pm.mu.Lock()
@@ -728,6 +742,16 @@ func (p *Peer) setupDataChannelHandlers(dc *webrtc.DataChannel) {
 	// OnBufferedAmountLow callback fires, enabling flow control.
 	dc.SetBufferedAmountLowThreshold(bufferedAmountLowThreshold)
 
+	// Signal the send goroutine that the buffer has drained and it can resume
+	// sending. Non-blocking send avoids goroutine leak if nobody is waiting.
+	// sendReady is never closed, so this cannot panic.
+	dc.OnBufferedAmountLow(func() {
+		select {
+		case p.sendReady <- struct{}{}:
+		default:
+		}
+	})
+
 	dc.OnOpen(func() {
 		p.logger.Info("DataChannel opened", "label", dc.Label())
 	})
@@ -784,44 +808,86 @@ func (p *Peer) logDTLSInfo() {
 	}
 }
 
+// waitForSendReady blocks if the DataChannel buffer exceeds maxBufferedAmount,
+// waiting for the OnBufferedAmountLow callback to signal that sending can resume.
+// Returns an error if the timeout expires or the peer is closed (done channel
+// is closed by Close()). The dc parameter must be captured under p.mu before
+// calling this method (which runs without the lock held).
+func (p *Peer) waitForSendReady(dc *webrtc.DataChannel) error {
+	// Drain any stale signal from a prior drain cycle to prevent false
+	// fast-path returns when the buffer has refilled since the last signal.
+	select {
+	case <-p.sendReady:
+	default:
+	}
+
+	if dc.BufferedAmount() <= maxBufferedAmount {
+		return nil
+	}
+	p.logger.Debug("backpressure: waiting for buffer to drain",
+		"buffered", dc.BufferedAmount(), "max", maxBufferedAmount)
+	select {
+	case <-p.sendReady:
+		return nil
+	case <-p.done:
+		return fmt.Errorf("peer connection closed")
+	case <-time.After(sendReadyTimeout):
+		return fmt.Errorf("send timeout: DataChannel buffer full (%d bytes)", dc.BufferedAmount())
+	}
+}
+
 // SendRaw sends pre-encoded bytes directly over the DataChannel.
+// Blocks if the send buffer is full, waiting for backpressure to clear.
 func (p *Peer) SendRaw(data []byte) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if p.closed {
+		p.mu.Unlock()
 		return fmt.Errorf("peer connection closed")
 	}
-
 	if p.dc == nil {
+		p.mu.Unlock()
 		return fmt.Errorf("data channel not established")
 	}
+	dc := p.dc
+	p.mu.Unlock()
 
-	return p.dc.Send(data)
+	// Wait without holding p.mu so Close() can proceed concurrently.
+	if err := p.waitForSendReady(dc); err != nil {
+		return fmt.Errorf("backpressure: %w", err)
+	}
+	return dc.Send(data)
 }
 
 // SendMessage encodes and sends a protocol message over the DataChannel.
+// Blocks if the send buffer is full, waiting for backpressure to clear.
 func (p *Peer) SendMessage(msg protocol.Message) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if p.closed {
+		p.mu.Unlock()
 		return fmt.Errorf("peer connection closed")
 	}
-
 	if p.dc == nil {
+		p.mu.Unlock()
 		return fmt.Errorf("data channel not established")
 	}
+	dc := p.dc
+	p.mu.Unlock()
 
 	data, err := protocol.Encode(msg)
 	if err != nil {
 		return fmt.Errorf("encode message: %w", err)
 	}
 
-	return p.dc.Send(data)
+	// Wait without holding p.mu so Close() can proceed concurrently.
+	if err := p.waitForSendReady(dc); err != nil {
+		return fmt.Errorf("backpressure: %w", err)
+	}
+	return dc.Send(data)
 }
 
-// Close cleanly shuts down the peer connection.
+// Close cleanly shuts down the peer connection. Closing the done channel
+// unblocks any goroutine waiting in waitForSendReady so it returns
+// immediately instead of waiting for the full sendReadyTimeout.
 func (p *Peer) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -830,6 +896,7 @@ func (p *Peer) Close() {
 		return
 	}
 	p.closed = true
+	close(p.done) // unblock any waiting senders immediately
 
 	if p.dc != nil {
 		p.dc.Close()
