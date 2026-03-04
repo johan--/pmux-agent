@@ -55,14 +55,16 @@ type FileSecretStore struct {
 	filePath string
 	secrets  map[string][]byte
 	loaded   bool
+	logger   *slog.Logger
 }
 
 // NewFileSecretStore creates an encrypted file-backed secret store.
 // The secrets file is stored in the given directory as "secrets.enc".
-func NewFileSecretStore(keysDir string) *FileSecretStore {
+func NewFileSecretStore(keysDir string, logger *slog.Logger) *FileSecretStore {
 	return &FileSecretStore{
 		filePath: filepath.Join(keysDir, secretsFileName),
 		secrets:  make(map[string][]byte),
+		logger:   logger,
 	}
 }
 
@@ -176,7 +178,7 @@ func (f *FileSecretStore) encrypt() ([]byte, error) {
 	}
 
 	// Derive encryption key
-	machineID, err := getMachineID(filepath.Dir(f.filePath))
+	machineID, err := getMachineID(filepath.Dir(f.filePath), f.logger)
 	if err != nil {
 		return nil, fmt.Errorf("get machine ID: %w", err)
 	}
@@ -224,7 +226,7 @@ func (f *FileSecretStore) decrypt(data []byte) error {
 	ciphertext := data[1+saltSize+nonceSize:]
 
 	// Derive decryption key
-	machineID, err := getMachineID(filepath.Dir(f.filePath))
+	machineID, err := getMachineID(filepath.Dir(f.filePath), f.logger)
 	if err != nil {
 		return fmt.Errorf("get machine ID: %w", err)
 	}
@@ -260,7 +262,7 @@ func deriveKey(machineID []byte, salt []byte) []byte {
 // getMachineID returns a machine-bound identifier for key derivation.
 // It tries platform-specific sources in order of preference, falling back to
 // a random persistent key if no machine ID is available.
-func getMachineID(keysDir string) ([]byte, error) {
+func getMachineID(keysDir string, logger *slog.Logger) ([]byte, error) {
 	// Try platform-specific machine ID sources
 	id, err := readMachineID()
 	if err == nil && len(id) > 0 {
@@ -269,13 +271,13 @@ func getMachineID(keysDir string) ([]byte, error) {
 	}
 
 	// Fallback: generate and persist a random key
-	return fallbackMachineID(keysDir)
+	return fallbackMachineID(keysDir, logger)
 }
 
 // fallbackMachineID generates or reads a persistent random key used when no
 // platform machine ID is available. The key is stored at keysDir/machine-id.key
 // with mode 0600.
-func fallbackMachineID(keysDir string) ([]byte, error) {
+func fallbackMachineID(keysDir string, logger *slog.Logger) ([]byte, error) {
 	keyPath := filepath.Join(keysDir, fallbackKeyFileName)
 
 	data, err := os.ReadFile(keyPath)
@@ -305,7 +307,7 @@ func fallbackMachineID(keysDir string) ([]byte, error) {
 		return nil, fmt.Errorf("write fallback machine ID key: %w", err)
 	}
 
-	slog.Warn("no platform machine ID available, using generated fallback", "path", keyPath)
+	logger.Warn("no platform machine ID available, using generated fallback", "path", keyPath)
 
 	return hmacSHA256(key, machineIDApp), nil
 }

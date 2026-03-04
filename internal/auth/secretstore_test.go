@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,7 +85,7 @@ func TestMemorySecretStore(t *testing.T) {
 
 func TestFileSecretStore(t *testing.T) {
 	dir := t.TempDir()
-	store := NewFileSecretStore(dir)
+	store := NewFileSecretStore(dir, slog.Default())
 
 	t.Run("Get returns ErrSecretNotFound for empty store", func(t *testing.T) {
 		_, err := store.Get("nonexistent")
@@ -115,7 +116,7 @@ func TestFileSecretStore(t *testing.T) {
 		}
 
 		// Create a new store pointing at the same directory
-		store2 := NewFileSecretStore(dir)
+		store2 := NewFileSecretStore(dir, slog.Default())
 		got, err := store2.Get("persist-key")
 		if err != nil {
 			t.Fatalf("Get() from new store error: %v", err)
@@ -198,7 +199,7 @@ func TestNewSecretStore_FileFallback(t *testing.T) {
 	dir := t.TempDir()
 
 	// "file" backend should always succeed
-	store, err := NewSecretStore(dir, "file")
+	store, err := NewSecretStore(dir, "file", slog.Default())
 	if err != nil {
 		t.Fatalf("NewSecretStore(file) error: %v", err)
 	}
@@ -210,7 +211,7 @@ func TestNewSecretStore_FileFallback(t *testing.T) {
 func TestNewSecretStore_InvalidBackend(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := NewSecretStore(dir, "invalid")
+	_, err := NewSecretStore(dir, "invalid", slog.Default())
 	if err == nil {
 		t.Fatal("expected error for invalid backend, got nil")
 	}
@@ -220,7 +221,7 @@ func TestFallbackMachineID(t *testing.T) {
 	t.Run("generates and persists a 32-byte key", func(t *testing.T) {
 		dir := t.TempDir()
 
-		id1, err := fallbackMachineID(dir)
+		id1, err := fallbackMachineID(dir, slog.Default())
 		if err != nil {
 			t.Fatalf("fallbackMachineID() error: %v", err)
 		}
@@ -251,12 +252,12 @@ func TestFallbackMachineID(t *testing.T) {
 	t.Run("returns same value on subsequent calls", func(t *testing.T) {
 		dir := t.TempDir()
 
-		id1, err := fallbackMachineID(dir)
+		id1, err := fallbackMachineID(dir, slog.Default())
 		if err != nil {
 			t.Fatalf("first call error: %v", err)
 		}
 
-		id2, err := fallbackMachineID(dir)
+		id2, err := fallbackMachineID(dir, slog.Default())
 		if err != nil {
 			t.Fatalf("second call error: %v", err)
 		}
@@ -275,7 +276,7 @@ func TestFallbackMachineID(t *testing.T) {
 			t.Fatalf("writing corrupt key: %v", err)
 		}
 
-		_, err := fallbackMachineID(dir)
+		_, err := fallbackMachineID(dir, slog.Default())
 		if err == nil {
 			t.Fatal("expected error for corrupt key file, got nil")
 		}
@@ -284,7 +285,7 @@ func TestFallbackMachineID(t *testing.T) {
 	t.Run("creates directory if missing", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "nested", "keys")
 
-		_, err := fallbackMachineID(dir)
+		_, err := fallbackMachineID(dir, slog.Default())
 		if err != nil {
 			t.Fatalf("fallbackMachineID() error: %v", err)
 		}

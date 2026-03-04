@@ -78,14 +78,14 @@ func Run(ctx context.Context, paths config.Paths) error {
 	}
 
 	// Create secret store for secure key storage
-	store, err := auth.NewSecretStore(paths.KeysDir, cfg.Identity.SecretBackend)
+	store, err := auth.NewSecretStore(paths.KeysDir, cfg.Identity.SecretBackend, logger)
 	if err != nil {
 		return &FatalInitError{Err: fmt.Errorf("initialize secret store: %w", err)}
 	}
 	logger.Info("secret store initialized", "backend", store.Backend())
 
 	// Load identity
-	identity, err := auth.LoadIdentity(paths.KeysDir, store)
+	identity, err := auth.LoadIdentity(paths.KeysDir, store, logger)
 	if err != nil {
 		return &FatalInitError{Err: fmt.Errorf("load identity: %w", err)}
 	}
