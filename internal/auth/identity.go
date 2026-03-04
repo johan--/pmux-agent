@@ -56,11 +56,11 @@ func GenerateIdentity(keysDir string, store SecretStore) (*Identity, error) {
 
 // LoadIdentity loads an existing Ed25519 keypair. The private key is retrieved
 // from the SecretStore and the public key is read from keysDir on disk.
-func LoadIdentity(keysDir string, store SecretStore) (*Identity, error) {
+func LoadIdentity(keysDir string, store SecretStore, logger *slog.Logger) (*Identity, error) {
 	pubPath := filepath.Join(keysDir, publicKeyFile)
 
 	// Check and fix permissions on public key file
-	if err := enforceKeyFilePerms(pubPath); err != nil {
+	if err := enforceKeyFilePerms(pubPath, logger); err != nil {
 		return nil, fmt.Errorf("enforce public key permissions: %w", err)
 	}
 
@@ -95,7 +95,7 @@ func LoadIdentity(keysDir string, store SecretStore) (*Identity, error) {
 
 // enforceKeyFilePerms checks that a key file has 0600 permissions.
 // If the file is more permissive, it fixes the permissions and logs a warning.
-func enforceKeyFilePerms(path string) error {
+func enforceKeyFilePerms(path string, logger *slog.Logger) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", filepath.Base(path), err)
@@ -103,7 +103,7 @@ func enforceKeyFilePerms(path string) error {
 
 	perm := info.Mode().Perm()
 	if perm != keyFilePerms {
-		slog.Warn("insecure key file permissions detected, fixing",
+		logger.Warn("insecure key file permissions detected, fixing",
 			"file", filepath.Base(path),
 			"was", fmt.Sprintf("%04o", perm),
 			"fixed", fmt.Sprintf("%04o", keyFilePerms),

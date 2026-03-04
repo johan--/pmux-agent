@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,7 +81,7 @@ func TestLoadIdentity(t *testing.T) {
 		t.Fatalf("GenerateIdentity() error: %v", err)
 	}
 
-	loaded, err := LoadIdentity(keysDir, store)
+	loaded, err := LoadIdentity(keysDir, store, slog.Default())
 	if err != nil {
 		t.Fatalf("LoadIdentity() error: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestLoadIdentity_Errors(t *testing.T) {
 			store := NewMemorySecretStore()
 			tt.setup(dir, store)
 
-			_, err := LoadIdentity(dir, store)
+			_, err := LoadIdentity(dir, store, slog.Default())
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -300,7 +301,7 @@ func TestLoadIdentity_FixesInsecurePermissions(t *testing.T) {
 		}
 
 		// LoadIdentity should fix it
-		_, err := LoadIdentity(keysDir, store)
+		_, err := LoadIdentity(keysDir, store, slog.Default())
 		if err != nil {
 			t.Fatalf("LoadIdentity() error: %v", err)
 		}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -45,7 +46,7 @@ func loadEffectiveConfig() config.Config {
 // initSecretStore creates a SecretStore using the config's secret_backend setting.
 // Uses the keys directory for the encrypted file fallback.
 func initSecretStore(paths config.Paths, cfg config.Config) (auth.SecretStore, error) {
-	return auth.NewSecretStore(paths.KeysDir, cfg.Identity.SecretBackend)
+	return auth.NewSecretStore(paths.KeysDir, cfg.Identity.SecretBackend, slog.Default())
 }
 
 func main() {
@@ -211,7 +212,7 @@ func handleInit() {
 
 	// Check if identity already exists
 	if auth.HasIdentity(paths.KeysDir, store) {
-		id, err := auth.LoadIdentity(paths.KeysDir, store)
+		id, err := auth.LoadIdentity(paths.KeysDir, store, slog.Default())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "⚠ failed to load existing identity: %v\n", err)
 			os.Exit(1)
@@ -317,7 +318,7 @@ func handlePair() {
 		os.Exit(1)
 	}
 
-	id, err := auth.LoadIdentity(paths.KeysDir, store)
+	id, err := auth.LoadIdentity(paths.KeysDir, store, slog.Default())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ failed to load identity: %v\n", err)
 		os.Exit(1)

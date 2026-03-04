@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"log/slog"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 //   - "file": use encrypted file, skip keyring even if available
 //
 // keysDir is the directory for the encrypted file fallback (e.g., ~/.config/pmux/keys/).
-func NewSecretStore(keysDir string, backendPref string) (SecretStore, error) {
+func NewSecretStore(keysDir string, backendPref string, logger *slog.Logger) (SecretStore, error) {
 	switch backendPref {
 	case BackendKeyring:
 		if err := ProbeKeyring(); err != nil {
@@ -32,7 +33,7 @@ func NewSecretStore(keysDir string, backendPref string) (SecretStore, error) {
 		return NewKeyringSecretStore(), nil
 
 	case BackendFile:
-		return NewFileSecretStore(keysDir), nil
+		return NewFileSecretStore(keysDir, logger), nil
 
 	case BackendAuto, "":
 		// Try keyring first
@@ -40,7 +41,7 @@ func NewSecretStore(keysDir string, backendPref string) (SecretStore, error) {
 			return NewKeyringSecretStore(), nil
 		}
 		// Fall back to encrypted file
-		return NewFileSecretStore(keysDir), nil
+		return NewFileSecretStore(keysDir, logger), nil
 
 	default:
 		return nil, fmt.Errorf("unknown secret backend: %q (use %q, %q, or %q)",
