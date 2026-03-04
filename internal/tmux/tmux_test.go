@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -317,6 +318,39 @@ func TestClient_ResizeWindowAuto(t *testing.T) {
 	// Auto-resize should not error
 	if err := tc.ResizeWindowAuto(windowTarget); err != nil {
 		t.Errorf("ResizeWindowAuto: %v", err)
+	}
+}
+
+func TestListWindows_InvalidTarget(t *testing.T) {
+	c := NewClient(testSocket)
+	_, err := c.ListWindows(";evil-cmd")
+	if err == nil {
+		t.Fatal("expected error for invalid target")
+	}
+	if !errors.Is(err, ErrInvalidTarget) {
+		t.Errorf("expected ErrInvalidTarget, got: %v", err)
+	}
+}
+
+func TestListPanes_InvalidTarget(t *testing.T) {
+	c := NewClient(testSocket)
+	_, err := c.ListPanes("$(whoami)")
+	if err == nil {
+		t.Fatal("expected error for invalid target")
+	}
+	if !errors.Is(err, ErrInvalidTarget) {
+		t.Errorf("expected ErrInvalidTarget, got: %v", err)
+	}
+}
+
+func TestWindowForPane_InvalidTarget(t *testing.T) {
+	c := NewClient(testSocket)
+	_, err := c.windowForPane("`rm -rf /`")
+	if err == nil {
+		t.Fatal("expected error for invalid target")
+	}
+	if !errors.Is(err, ErrInvalidTarget) {
+		t.Errorf("expected ErrInvalidTarget, got: %v", err)
 	}
 }
 
