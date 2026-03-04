@@ -263,6 +263,10 @@ func (pb *PaneBridge) Close() error {
 
 // windowForPane returns the "session_id:window_id" target for a pane.
 func (c *Client) windowForPane(paneID string) (string, error) {
+	if err := validateTarget(paneID); err != nil {
+		return "", fmt.Errorf("find window for pane: %w", err)
+	}
+
 	out, err := c.run("display-message", "-t", paneID, "-p", "#{session_id}:#{window_id}")
 	if err != nil {
 		return "", fmt.Errorf("find window for pane: %w: %s", err, out)

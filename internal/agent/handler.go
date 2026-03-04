@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"sync"
 	"time"
 
@@ -24,10 +23,6 @@ const (
 	// 16 KB is well within OS ARG_MAX limits for tmux send-keys via execve.
 	maxInputSize = 16 * 1024
 )
-
-// validTmuxTarget matches tmux pane/session/window IDs like %0, $1, @2,
-// $1:@2.%3, session-name, etc. Rejects shell metacharacters.
-var validTmuxTarget = regexp.MustCompile(`^[a-zA-Z0-9_.$@:%\-]+$`)
 
 // SendFunc sends a protocol message to a specific peer.
 type SendFunc func(peerID string, msg protocol.Message) error
@@ -196,7 +191,7 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 	h.logger.Debug("attach requested", "peer", peerID, "pane", req.PaneID, "reattach", req.Reattach)
 
 	// Validate pane ID format before passing to tmux CLI.
-	if !validTmuxTarget.MatchString(req.PaneID) {
+	if !tmux.ValidTmuxTarget.MatchString(req.PaneID) {
 		h.sendError(peerID, "attach_failed", fmt.Sprintf("invalid pane ID: %q", req.PaneID))
 		return
 	}
@@ -380,7 +375,7 @@ func (h *Handler) handlePing(peerID string) {
 
 func (h *Handler) handleKillSession(peerID string, req *protocol.KillSessionRequest) {
 	// Validate session ID format before passing to tmux CLI.
-	if !validTmuxTarget.MatchString(req.Session) {
+	if !tmux.ValidTmuxTarget.MatchString(req.Session) {
 		h.sendError(peerID, "kill_session_failed", fmt.Sprintf("invalid session ID: %q", req.Session))
 		return
 	}
