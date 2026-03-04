@@ -229,7 +229,7 @@ func TestFallbackMachineID(t *testing.T) {
 		}
 
 		// Verify the key file exists with correct size
-		keyPath := filepath.Join(dir, "machine-id.key")
+		keyPath := filepath.Join(dir, fallbackKeyFileName)
 		data, err := os.ReadFile(keyPath)
 		if err != nil {
 			t.Fatalf("reading key file: %v", err)
@@ -270,7 +270,7 @@ func TestFallbackMachineID(t *testing.T) {
 		dir := t.TempDir()
 
 		// Write a key file with wrong size
-		keyPath := filepath.Join(dir, "machine-id.key")
+		keyPath := filepath.Join(dir, fallbackKeyFileName)
 		if err := os.WriteFile(keyPath, []byte("too-short"), 0600); err != nil {
 			t.Fatalf("writing corrupt key: %v", err)
 		}
@@ -289,7 +289,7 @@ func TestFallbackMachineID(t *testing.T) {
 			t.Fatalf("fallbackMachineID() error: %v", err)
 		}
 
-		keyPath := filepath.Join(dir, "machine-id.key")
+		keyPath := filepath.Join(dir, fallbackKeyFileName)
 		if _, err := os.Stat(keyPath); err != nil {
 			t.Errorf("key file not created at %s: %v", keyPath, err)
 		}

@@ -276,7 +276,7 @@ func getMachineID(keysDir string) ([]byte, error) {
 // platform machine ID is available. The key is stored at keysDir/machine-id.key
 // with mode 0600.
 func fallbackMachineID(keysDir string) ([]byte, error) {
-	keyPath := filepath.Join(keysDir, "machine-id.key")
+	keyPath := filepath.Join(keysDir, fallbackKeyFileName)
 
 	data, err := os.ReadFile(keyPath)
 	if err == nil {
