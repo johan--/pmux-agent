@@ -1343,6 +1343,7 @@ func TestPeer_SendRaw_ClosedPeerReturnsError(t *testing.T) {
 		logger:    testLogger().With("peer", "test"),
 		closed:    true,
 		sendReady: make(chan struct{}, 1),
+		done:      make(chan struct{}),
 	}
 	err := peer.SendRaw([]byte("data"))
 	if err == nil {
@@ -1360,6 +1361,7 @@ func TestPeer_SendMessage_ClosedPeerReturnsError(t *testing.T) {
 		logger:    testLogger().With("peer", "test"),
 		closed:    true,
 		sendReady: make(chan struct{}, 1),
+		done:      make(chan struct{}),
 	}
 	err := peer.SendMessage(&protocol.PongEvent{Type: "pong"})
 	if err == nil {
@@ -1368,6 +1370,55 @@ func TestPeer_SendMessage_ClosedPeerReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "closed") {
 		t.Errorf("error should mention 'closed', got: %v", err)
 	}
+}
+
+func TestPeer_CloseUnblocksWaitingBackpressure(t *testing.T) {
+	// Verify that Close() immediately unblocks a goroutine waiting in
+	// waitForSendReady via the done channel, rather than waiting for the
+	// full sendReadyTimeout. This is the TOCTOU race fix — sendReady is
+	// never closed, so OnBufferedAmountLow cannot panic.
+	sender := &mockSender{}
+	logger := testLogger()
+	turnServer := mockTurnServer(t)
+	defer turnServer.Close()
+
+	api := fastAPI(t)
+	pm := NewPeerManager(logger, sender, turnServer.URL, func() string { return "test-jwt" }, nil)
+	pm.API = api
+
+	pm.HandleSignalingMessage(SignalingMessage{
+		Type:           "connect_request",
+		TargetDeviceID: "mobile-close-bp",
+	})
+	time.Sleep(500 * time.Millisecond)
+
+	peer := getPeer(pm, "mobile-close-bp")
+	if peer == nil {
+		t.Fatal("peer should exist")
+	}
+
+	// Verify the done channel is open (non-blocking receive should not succeed)
+	select {
+	case <-peer.done:
+		t.Fatal("done channel should be open before Close()")
+	default:
+	}
+
+	// Close the peer — done channel should close
+	peer.Close()
+
+	// Verify done channel is now closed (non-blocking receive should succeed)
+	select {
+	case <-peer.done:
+		// Expected — done is closed
+	default:
+		t.Error("done channel should be closed after Close()")
+	}
+
+	// Verify double-close is safe
+	peer.Close()
+
+	pm.CloseAll()
 }
 
 // TestBasicDataChannel verifies that two fastAPI peer connections can
