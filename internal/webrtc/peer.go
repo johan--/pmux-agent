@@ -742,7 +742,14 @@ func (p *Peer) setupDataChannelHandlers(dc *webrtc.DataChannel) {
 
 	// Signal the send goroutine that the buffer has drained and it can resume
 	// sending. Non-blocking send avoids goroutine leak if nobody is waiting.
+	// Guard against sending on a closed channel (closed by Close()).
 	dc.OnBufferedAmountLow(func() {
+		p.mu.Lock()
+		closed := p.closed
+		p.mu.Unlock()
+		if closed {
+			return
+		}
 		select {
 		case p.sendReady <- struct{}{}:
 		default:
@@ -807,16 +814,28 @@ func (p *Peer) logDTLSInfo() {
 
 // waitForSendReady blocks if the DataChannel buffer exceeds maxBufferedAmount,
 // waiting for the OnBufferedAmountLow callback to signal that sending can resume.
-// Returns an error if the timeout expires. The dc parameter must be captured
-// under p.mu before calling this method (which runs without the lock held).
+// Returns an error if the timeout expires or the peer is closed (sendReady is
+// closed by Close()). The dc parameter must be captured under p.mu before
+// calling this method (which runs without the lock held).
 func (p *Peer) waitForSendReady(dc *webrtc.DataChannel) error {
+	// Drain any stale signal from a prior drain cycle to prevent false
+	// fast-path returns when the buffer has refilled since the last signal.
+	select {
+	case <-p.sendReady:
+	default:
+	}
+
 	if dc.BufferedAmount() <= maxBufferedAmount {
 		return nil
 	}
 	p.logger.Debug("backpressure: waiting for buffer to drain",
 		"buffered", dc.BufferedAmount(), "max", maxBufferedAmount)
 	select {
-	case <-p.sendReady:
+	case _, ok := <-p.sendReady:
+		if !ok {
+			// Channel closed by Close() — peer is shutting down.
+			return fmt.Errorf("peer connection closed")
+		}
 		return nil
 	case <-time.After(sendReadyTimeout):
 		return fmt.Errorf("send timeout: DataChannel buffer full (%d bytes)", dc.BufferedAmount())
@@ -872,7 +891,9 @@ func (p *Peer) SendMessage(msg protocol.Message) error {
 	return dc.Send(data)
 }
 
-// Close cleanly shuts down the peer connection.
+// Close cleanly shuts down the peer connection. Closing sendReady unblocks
+// any goroutine waiting in waitForSendReady so it returns immediately
+// instead of waiting for the full sendReadyTimeout.
 func (p *Peer) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -881,6 +902,7 @@ func (p *Peer) Close() {
 		return
 	}
 	p.closed = true
+	close(p.sendReady) // unblock any waiting senders immediately
 
 	if p.dc != nil {
 		p.dc.Close()
