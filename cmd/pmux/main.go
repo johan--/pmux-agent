@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -173,7 +174,7 @@ func runAgent(cpuProfile, memProfile string) {
 		}
 	}
 
-	if agentErr != nil && agentErr != context.Canceled {
+	if agentErr != nil && !errors.Is(agentErr, context.Canceled) {
 		// Fatal initialization errors should not trigger service restart.
 		// These won't self-resolve, so exit 0 to prevent restart loops.
 		if agent.IsFatalInitError(agentErr) {
