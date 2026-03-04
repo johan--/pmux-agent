@@ -181,7 +181,7 @@ func Run(ctx context.Context, paths config.Paths) error {
 	signalingClient.Close()
 	RemovePIDFile(pidFile)
 
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
 	return nil
