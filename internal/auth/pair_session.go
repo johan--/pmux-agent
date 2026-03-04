@@ -91,7 +91,7 @@ func InitiatePairing(id *Identity, x25519PubKeyBase64 string, serverURL string, 
 	url := strings.TrimRight(serverURL, "/") + "/auth/pair/initiate"
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("%s", connError(err))
+		return nil, errors.New(connError(err))
 	}
 	defer resp.Body.Close()
 
@@ -101,7 +101,7 @@ func InitiatePairing(id *Identity, x25519PubKeyBase64 string, serverURL string, 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s", serverError(resp.StatusCode, respBody))
+		return nil, errors.New(serverError(resp.StatusCode, respBody))
 	}
 
 	var result PairInitiateResponse

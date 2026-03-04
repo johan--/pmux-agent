@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,7 +41,7 @@ func ExchangeToken(id *Identity, serverURL string, client *http.Client) (string,
 	url := strings.TrimRight(serverURL, "/") + "/auth/token"
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("%s", connError(err))
+		return "", errors.New(connError(err))
 	}
 	defer resp.Body.Close()
 
@@ -50,7 +51,7 @@ func ExchangeToken(id *Identity, serverURL string, client *http.Client) (string,
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s", serverError(resp.StatusCode, respBody))
+		return "", errors.New(serverError(resp.StatusCode, respBody))
 	}
 
 	var tokenResp TokenResponse
