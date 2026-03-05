@@ -111,7 +111,11 @@ func Run(ctx context.Context, paths config.Paths) error {
 		return peerManager.SendTo(peerID, msg)
 	}, logger)
 
-	signalingClient := webrtc.NewSignalingClient(identity, serverURL, func(msg webrtc.SignalingMessage) {
+	hostName := cfg.Name
+	if hostName == "" {
+		hostName = config.DefaultHostName()
+	}
+	signalingClient := webrtc.NewSignalingClient(identity, serverURL, hostName, func(msg webrtc.SignalingMessage) {
 		peerManager.HandleSignalingMessage(msg)
 	}, logger)
 	signalingClient.PresenceInterval = cfg.KeepaliveInterval()
