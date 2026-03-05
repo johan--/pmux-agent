@@ -130,8 +130,7 @@ func Run(ctx context.Context, paths config.Paths) error {
 	// On error (corrupt file, decryption failure), reject all connections
 	// rather than falling through with an empty AllowedDeviceID (which would
 	// allow any device to connect).
-	pairedDevicesPath := filepath.Join(paths.ConfigDir, "paired_devices.json")
-	pairedDevice, err := auth.LoadPairedDevice(pairedDevicesPath, store)
+	pairedDevice, err := auth.LoadPairedDevice(paths.PairedDevices, store)
 	if err != nil {
 		logger.Warn("failed to load paired device, rejecting all connections", "error", err)
 		peerManager.AllowedDeviceID = "!invalid-load-error"
@@ -162,7 +161,7 @@ func Run(ctx context.Context, paths config.Paths) error {
 				signalingClient.SignalActivity()
 			case <-usr2Ch:
 				logger.Info("SIGUSR2 received, handling unpair")
-				device, err := auth.LoadPairedDevice(pairedDevicesPath, store)
+				device, err := auth.LoadPairedDevice(paths.PairedDevices, store)
 				if err != nil || device == nil {
 					peerManager.AllowedDeviceID = "!unpaired"
 					peerManager.CloseAll()

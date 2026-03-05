@@ -150,11 +150,9 @@ func TestRunUnpair_NotifiesServer(t *testing.T) {
 	store := auth.NewMemorySecretStore()
 
 	// Generate identity so LoadIdentity succeeds
-	id, err := auth.GenerateIdentity(paths.KeysDir, store)
-	if err != nil {
+	if _, err := auth.GenerateIdentity(paths.KeysDir, store); err != nil {
 		t.Fatalf("GenerateIdentity: %v", err)
 	}
-	_ = id
 
 	writeSinglePairedDevice(t, paths.PairedDevices)
 
