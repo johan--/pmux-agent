@@ -70,6 +70,9 @@ func Run(ctx context.Context, paths config.Paths) error {
 	usr1Ch := make(chan os.Signal, 1)
 	signal.Notify(usr1Ch, syscall.SIGUSR1)
 
+	usr2Ch := make(chan os.Signal, 1)
+	signal.Notify(usr2Ch, syscall.SIGUSR2)
+
 	// Load config for server URL, socket name, and timing settings
 	cfg, err := config.LoadConfig(paths.ConfigFile)
 	if err != nil {
@@ -152,10 +155,19 @@ func Run(ctx context.Context, paths config.Paths) error {
 			select {
 			case <-ctx.Done():
 				signal.Stop(usr1Ch)
+				signal.Stop(usr2Ch)
 				return
 			case <-usr1Ch:
 				logger.Info("SIGUSR1 received, signaling activity")
 				signalingClient.SignalActivity()
+			case <-usr2Ch:
+				logger.Info("SIGUSR2 received, handling unpair")
+				device, err := auth.LoadPairedDevice(pairedDevicesPath, store)
+				if err != nil || device == nil {
+					peerManager.AllowedDeviceID = "!unpaired"
+					peerManager.CloseAll()
+					logger.Info("unpair complete: all peers closed")
+				}
 			}
 		}
 	}()

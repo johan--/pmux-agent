@@ -29,6 +29,14 @@ func signalActivity(pid int) {
 	}
 }
 
+// signalUnpair sends SIGUSR2 to notify the agent of an unpair event.
+// No-op if the signal can't be delivered (process exited between check and signal).
+func signalUnpair(pid int) {
+	if proc, err := os.FindProcess(pid); err == nil {
+		proc.Signal(syscall.SIGUSR2) //nolint:errcheck // Best-effort notification
+	}
+}
+
 // EnsureRunning checks if the agent is already running and starts it if not.
 // Returns nil if the agent is running (or was started successfully).
 // Does nothing if no identity exists (agent can't authenticate without one).
