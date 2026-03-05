@@ -3,19 +3,20 @@ package agent
 import (
 	"fmt"
 	"io"
+	"log/slog"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/shiftinbits/pmux-agent/internal/auth"
+	"github.com/shiftinbits/pmux-agent/internal/config"
 )
 
 // RunUnpair removes the paired mobile device after confirmation.
-//
-// Known limitation: unpair only removes the device from local storage.
-// The agent will reject messages from the device on its next connection
-// attempt. Actively closing the DataChannel and notifying the signaling
-// server is tracked in SB-357.
-func RunUnpair(pairedDevicesPath string, store auth.SecretStore, r io.Reader, w io.Writer) error {
-	device, err := auth.LoadPairedDevice(pairedDevicesPath, store)
+// It notifies the signaling server (best-effort) and signals the running
+// agent to close active connections before removing the local pairing.
+func RunUnpair(paths config.Paths, store auth.SecretStore, r io.Reader, w io.Writer) error {
+	device, err := auth.LoadPairedDevice(paths.PairedDevices, store)
 	if err != nil {
 		return fmt.Errorf("load paired device: %w", err)
 	}
@@ -48,8 +49,24 @@ func RunUnpair(pairedDevicesPath string, store auth.SecretStore, r io.Reader, w 
 		return nil
 	}
 
-	if err := auth.RemovePairedDevice(pairedDevicesPath, device.DeviceID, store); err != nil {
+	// Notify signaling server (best-effort)
+	identity, identErr := auth.LoadIdentity(paths.KeysDir, store, slog.Default())
+	if identErr == nil {
+		cfg, _ := config.LoadConfig(paths.ConfigFile)
+		httpClient := &http.Client{Timeout: 10 * time.Second}
+		if err := auth.DeletePairing(identity, cfg.ServerURL(), httpClient); err != nil {
+			fmt.Fprintf(w, "Warning: could not notify server: %v\n", err)
+		}
+	}
+
+	if err := auth.RemovePairedDevice(paths.PairedDevices, device.DeviceID, store); err != nil {
 		return fmt.Errorf("remove device: %w", err)
+	}
+
+	// Signal running agent to close connections (best-effort)
+	pidFile := PIDFilePath(paths)
+	if pid, err := ReadPIDFile(pidFile); err == nil && IsProcessRunning(pid) {
+		signalUnpair(pid)
 	}
 
 	fmt.Fprintf(w, "Device '%s' unpaired successfully.\n", name)

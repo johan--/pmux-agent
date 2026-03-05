@@ -479,7 +479,7 @@ func handleUnpair() {
 		os.Exit(1)
 	}
 
-	if err := agent.RunUnpair(paths.PairedDevices, store, os.Stdin, os.Stdout); err != nil {
+	if err := agent.RunUnpair(paths, store, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}

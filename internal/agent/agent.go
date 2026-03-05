@@ -70,6 +70,9 @@ func Run(ctx context.Context, paths config.Paths) error {
 	usr1Ch := make(chan os.Signal, 1)
 	signal.Notify(usr1Ch, syscall.SIGUSR1)
 
+	usr2Ch := make(chan os.Signal, 1)
+	signal.Notify(usr2Ch, syscall.SIGUSR2)
+
 	// Load config for server URL, socket name, and timing settings
 	cfg, err := config.LoadConfig(paths.ConfigFile)
 	if err != nil {
@@ -125,15 +128,14 @@ func Run(ctx context.Context, paths config.Paths) error {
 
 	// Load paired device for connection validation.
 	// On error (corrupt file, decryption failure), reject all connections
-	// rather than falling through with an empty AllowedDeviceID (which would
+	// rather than falling through with an empty allowedDeviceID (which would
 	// allow any device to connect).
-	pairedDevicesPath := filepath.Join(paths.ConfigDir, "paired_devices.json")
-	pairedDevice, err := auth.LoadPairedDevice(pairedDevicesPath, store)
+	pairedDevice, err := auth.LoadPairedDevice(paths.PairedDevices, store)
 	if err != nil {
 		logger.Warn("failed to load paired device, rejecting all connections", "error", err)
-		peerManager.AllowedDeviceID = "!invalid-load-error"
+		peerManager.SetAllowedDeviceID("!invalid-load-error")
 	} else if pairedDevice != nil {
-		peerManager.AllowedDeviceID = pairedDevice.DeviceID
+		peerManager.SetAllowedDeviceID(pairedDevice.DeviceID)
 	}
 
 	// Create a cancelable context for the agent
@@ -152,10 +154,23 @@ func Run(ctx context.Context, paths config.Paths) error {
 			select {
 			case <-ctx.Done():
 				signal.Stop(usr1Ch)
+				signal.Stop(usr2Ch)
 				return
 			case <-usr1Ch:
 				logger.Info("SIGUSR1 received, signaling activity")
 				signalingClient.SignalActivity()
+			case <-usr2Ch:
+				logger.Info("SIGUSR2 received, handling unpair")
+				// The CLI removes paired_devices.json before sending SIGUSR2,
+				// so LoadPairedDevice should return nil. If there's a tiny race
+				// where the file hasn't been removed yet, we skip — the agent
+				// will reject the device on its next connection attempt anyway.
+				device, err := auth.LoadPairedDevice(paths.PairedDevices, store)
+				if err != nil || device == nil {
+					peerManager.SetAllowedDeviceID("!unpaired")
+					peerManager.CloseAll()
+					logger.Info("unpair complete: all peers closed")
+				}
 			}
 		}
 	}()
