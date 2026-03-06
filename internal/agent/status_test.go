@@ -39,6 +39,7 @@ func (m *mockServiceManager) Stop() error                          { return nil 
 
 func testStatusParams(dir string, store auth.SecretStore) StatusParams {
 	return StatusParams{
+		Version:           "0.1.0-test",
 		PairedDevicesPath: filepath.Join(dir, "paired_devices.json"),
 		Store:             store,
 		PIDFilePath:       filepath.Join(dir, "nonexistent.pid"),
@@ -60,6 +61,9 @@ func TestRunStatus_NoDevice(t *testing.T) {
 	}
 
 	output := buf.String()
+	if !strings.Contains(output, "Version:  0.1.0-test") {
+		t.Errorf("expected 'Version:  0.1.0-test', got: %s", output)
+	}
 	if !strings.Contains(output, "Agent:    not running") {
 		t.Errorf("expected 'Agent:    not running', got: %s", output)
 	}

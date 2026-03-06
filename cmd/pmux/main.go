@@ -519,6 +519,7 @@ func handleStatus() {
 	}
 
 	params := agent.StatusParams{
+		Version:           version,
 		PairedDevicesPath: paths.PairedDevices,
 		Store:             store,
 		PIDFilePath:       agent.PIDFilePath(paths),
@@ -589,6 +590,8 @@ func handleAgentStatus() {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
+
+	fmt.Printf("pmux %s\n", version)
 
 	pidFile := agent.PIDFilePath(paths)
 

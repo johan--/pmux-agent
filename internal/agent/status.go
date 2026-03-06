@@ -17,6 +17,7 @@ type SessionLister interface {
 
 // StatusParams holds all dependencies for the RunStatus command.
 type StatusParams struct {
+	Version           string
 	PairedDevicesPath string
 	Store             auth.SecretStore
 	PIDFilePath       string
@@ -27,6 +28,11 @@ type StatusParams struct {
 // RunStatus shows a comprehensive status overview: agent process, service
 // registration, tmux session count, and paired mobile device info.
 func RunStatus(params StatusParams, w io.Writer) error {
+	// --- Version ---
+	if params.Version != "" {
+		fmt.Fprintf(w, "Version:  %s\n", params.Version)
+	}
+
 	// --- Agent process status ---
 	agentLine := "not running"
 	if params.PIDFilePath != "" {
