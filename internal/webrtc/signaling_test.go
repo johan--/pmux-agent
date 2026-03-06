@@ -102,7 +102,7 @@ func TestSignalingClient_ConnectsAndAuthenticates(t *testing.T) {
 		mu.Unlock()
 	}
 
-	sc := NewSignalingClient(id, server.URL, handler, logger)
+	sc := NewSignalingClient(id, server.URL, "", handler, logger)
 	sc.HTTPClient = server.Client()
 
 	// Run will exit when context cancels or connection drops
@@ -144,7 +144,7 @@ func TestSignalingClient_SendsPresenceHeartbeats(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	sc := NewSignalingClient(id, server.URL, nil, logger)
+	sc := NewSignalingClient(id, server.URL, "", nil, logger)
 	sc.HTTPClient = server.Client()
 	sc.PresenceInterval = 200 * time.Millisecond // fast for testing
 
@@ -191,7 +191,7 @@ func TestSignalingClient_DispatchesMessages(t *testing.T) {
 		mu.Unlock()
 	}
 
-	sc := NewSignalingClient(id, server.URL, handler, logger)
+	sc := NewSignalingClient(id, server.URL, "", handler, logger)
 	sc.HTTPClient = server.Client()
 
 	sc.Run(ctx)
@@ -246,7 +246,7 @@ func TestSignalingClient_SendMessages(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	sc := NewSignalingClient(id, server.URL, nil, logger)
+	sc := NewSignalingClient(id, server.URL, "", nil, logger)
 	sc.HTTPClient = server.Client()
 
 	go sc.Run(ctx)
@@ -329,7 +329,7 @@ func TestSignalingClient_ReconnectsOnDisconnect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	sc := NewSignalingClient(id, server.URL, nil, logger)
+	sc := NewSignalingClient(id, server.URL, "", nil, logger)
 	sc.HTTPClient = server.Client()
 
 	sc.Run(ctx)
@@ -353,7 +353,7 @@ func TestSignalingClient_AuthFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	sc := NewSignalingClient(id, server.URL, nil, logger)
+	sc := NewSignalingClient(id, server.URL, "", nil, logger)
 	sc.HTTPClient = server.Client()
 
 	// Should keep trying to reconnect but always fail auth
@@ -364,7 +364,7 @@ func TestSignalingClient_AuthFailure(t *testing.T) {
 func TestSignalingClient_SendWhenNotConnected(t *testing.T) {
 	id, logger := testSetup(t)
 
-	sc := NewSignalingClient(id, "http://localhost:1", nil, logger)
+	sc := NewSignalingClient(id, "http://localhost:1", "", nil, logger)
 
 	err := sc.Send(SignalingMessage{Type: "presence"})
 	if err == nil {
@@ -385,7 +385,7 @@ func TestSignalingClient_Close(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sc := NewSignalingClient(id, server.URL, nil, logger)
+	sc := NewSignalingClient(id, server.URL, "", nil, logger)
 	sc.HTTPClient = server.Client()
 
 	done := make(chan struct{})
@@ -434,7 +434,7 @@ func TestSignalingClient_ErrorMessagesLogged(t *testing.T) {
 		mu.Unlock()
 	}
 
-	sc := NewSignalingClient(id, server.URL, handler, logger)
+	sc := NewSignalingClient(id, server.URL, "", handler, logger)
 	sc.HTTPClient = server.Client()
 
 	sc.Run(ctx)
@@ -447,5 +447,39 @@ func TestSignalingClient_ErrorMessagesLogged(t *testing.T) {
 		if msg.Type == "error" {
 			t.Error("error messages should not be dispatched to handler")
 		}
+	}
+}
+
+func TestSignalingClient_SendsNameInAuth(t *testing.T) {
+	id, logger := testSetup(t)
+
+	var receivedName atomic.Value
+	server := mockWSServer(t, func(conn *websocket.Conn) {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var msg SignalingMessage
+		json.Unmarshal(data, &msg)
+		if msg.Type == "auth" {
+			receivedName.Store(msg.Name)
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth","status":"ok"}`))
+		}
+		time.Sleep(500 * time.Millisecond)
+		conn.Close()
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	sc := NewSignalingClient(id, server.URL, "my-workstation", nil, logger)
+	sc.HTTPClient = server.Client()
+
+	sc.Run(ctx)
+
+	name, ok := receivedName.Load().(string)
+	if !ok || name != "my-workstation" {
+		t.Errorf("expected auth message name=%q, got %q", "my-workstation", name)
 	}
 }

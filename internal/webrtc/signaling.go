@@ -41,6 +41,7 @@ const (
 type SignalingMessage struct {
 	Type           string `json:"type"`
 	Token          string `json:"token,omitempty"`
+	Name           string `json:"name,omitempty"`
 	Status         string `json:"status,omitempty"`
 	Error          string `json:"error,omitempty"`
 	Reason         string `json:"reason,omitempty"`
@@ -67,6 +68,9 @@ type SignalingClient struct {
 	logger    *slog.Logger
 	handler   MessageHandler
 
+	// hostName is the host's display name sent in WebSocket auth messages.
+	hostName string
+
 	// PresenceInterval controls how often heartbeats are sent. Defaults to 30s.
 	PresenceInterval time.Duration
 
@@ -91,12 +95,13 @@ type SignalingClient struct {
 }
 
 // NewSignalingClient creates a signaling client for the given identity and server.
-func NewSignalingClient(identity *auth.Identity, serverURL string, handler MessageHandler, logger *slog.Logger) *SignalingClient {
+func NewSignalingClient(identity *auth.Identity, serverURL string, hostName string, handler MessageHandler, logger *slog.Logger) *SignalingClient {
 	return &SignalingClient{
 		identity:         identity,
 		serverURL:        strings.TrimRight(serverURL, "/"),
 		handler:          handler,
 		logger:           logger,
+		hostName:         hostName,
 		PresenceInterval: DefaultPresenceInterval,
 		activitySignal:   make(chan struct{}, 1),
 		HTTPClient:       &http.Client{Timeout: 10 * time.Second},
@@ -317,7 +322,7 @@ func (sc *SignalingClient) authenticate(conn *websocket.Conn) error {
 	jwt := sc.jwt
 	sc.mu.Unlock()
 
-	authMsg := SignalingMessage{Type: "auth", Token: jwt}
+	authMsg := SignalingMessage{Type: "auth", Token: jwt, Name: sc.hostName}
 	data, err := json.Marshal(authMsg)
 	if err != nil {
 		return fmt.Errorf("marshal auth message: %w", err)
