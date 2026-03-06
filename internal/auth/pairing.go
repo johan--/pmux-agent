@@ -199,6 +199,11 @@ func UpdatePairedDeviceName(path string, store SecretStore, deviceID, name strin
 // The shared secret is stored in the SecretStore; metadata is written to the JSON file.
 // Single-pairing mode: only one device can be paired at a time.
 func AddPairedDevice(path string, device PairedDevice, store SecretStore) error {
+	// Validate device ID format (defense-in-depth)
+	if err := ValidateDeviceID(device.DeviceID); err != nil {
+		return fmt.Errorf("add paired device: %w", err)
+	}
+
 	// Store shared secret in the secure store
 	if device.SharedSecret != "" {
 		secretBytes, err := base64.StdEncoding.DecodeString(device.SharedSecret)

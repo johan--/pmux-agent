@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 const (
@@ -141,6 +142,22 @@ func (id *Identity) SignChallenge(deviceID string, timestamp string) string {
 // Ed25519PublicKeyBase64 returns the base64-encoded Ed25519 public key for server registration.
 func (id *Identity) Ed25519PublicKeyBase64() string {
 	return base64.StdEncoding.EncodeToString(id.Ed25519PublicKey)
+}
+
+// deviceIDPattern matches a valid device ID: exactly 32 lowercase hex characters.
+var deviceIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// ValidateDeviceID checks that a device ID matches the expected format produced
+// by deriveDeviceID: exactly 32 lowercase hex characters (SHA-256 first 16 bytes).
+// Returns an error describing the validation failure, or nil if valid.
+func ValidateDeviceID(id string) error {
+	if len(id) != 32 {
+		return fmt.Errorf("invalid device ID: must be 32 hex characters, got %d chars", len(id))
+	}
+	if !deviceIDPattern.MatchString(id) {
+		return fmt.Errorf("invalid device ID: contains non-hex characters")
+	}
+	return nil
 }
 
 // deriveDeviceID computes a hex-encoded fingerprint from an Ed25519 public key.
