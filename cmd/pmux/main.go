@@ -452,9 +452,10 @@ func handlePair() {
 		os.Exit(1)
 	}
 
+	mobileName := auth.TruncateMobileName(pairComplete.MobileName)
 	err = auth.AddPairedDevice(paths.PairedDevices, auth.PairedDevice{
 		DeviceID:     pairComplete.MobileDeviceID,
-		Name:         pairComplete.MobileName,
+		Name:         mobileName,
 		SharedSecret: sharedSecret,
 		PairedAt:     time.Now(),
 	}, store)
@@ -463,7 +464,7 @@ func handlePair() {
 		os.Exit(1)
 	}
 
-	displayName := pairComplete.MobileName
+	displayName := mobileName
 	if displayName == "" {
 		displayName = pairComplete.MobileDeviceID
 	}

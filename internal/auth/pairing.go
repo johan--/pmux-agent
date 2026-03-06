@@ -16,6 +16,20 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
+// MaxMobileNameLen is the maximum allowed length for a mobile device name.
+// This limit is enforced during both initial pairing and name-update flows.
+const MaxMobileNameLen = 64
+
+// TruncateMobileName truncates a mobile device name to MaxMobileNameLen runes.
+// It operates on Unicode code points to avoid splitting multi-byte characters.
+func TruncateMobileName(name string) string {
+	runes := []rune(name)
+	if len(runes) > MaxMobileNameLen {
+		return string(runes[:MaxMobileNameLen])
+	}
+	return name
+}
+
 // X25519Keypair holds an ephemeral X25519 keypair for key exchange during pairing.
 type X25519Keypair struct {
 	PrivateKey *ecdh.PrivateKey
