@@ -174,6 +174,27 @@ func LoadPairedDevice(path string, store SecretStore) (*PairedDevice, error) {
 	return &devices[0], nil
 }
 
+// UpdatePairedDeviceName updates the name of a paired device if it matches
+// the given device ID and the name has actually changed.
+// Returns true if the name was updated, false otherwise.
+func UpdatePairedDeviceName(path string, store SecretStore, deviceID, name string) (bool, error) {
+	device, err := LoadPairedDevice(path, store)
+	if err != nil {
+		return false, fmt.Errorf("load paired device: %w", err)
+	}
+	if device == nil || device.DeviceID != deviceID {
+		return false, nil
+	}
+	if device.Name == name {
+		return false, nil
+	}
+	device.Name = name
+	if err := SavePairedDevices(path, []PairedDevice{*device}); err != nil {
+		return false, fmt.Errorf("save paired devices: %w", err)
+	}
+	return true, nil
+}
+
 // AddPairedDevice stores a paired device, replacing any existing pairing.
 // The shared secret is stored in the SecretStore; metadata is written to the JSON file.
 // Single-pairing mode: only one device can be paired at a time.

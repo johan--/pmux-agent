@@ -382,6 +382,72 @@ func TestLoadPairedDevice_Singular(t *testing.T) {
 	})
 }
 
+func TestUpdatePairedDeviceName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "paired_devices.json")
+	store := NewMemorySecretStore()
+
+	// Set up a paired device with a name
+	secret := base64.StdEncoding.EncodeToString([]byte("test-secret"))
+	err := AddPairedDevice(path, PairedDevice{
+		DeviceID:     "mobile-1",
+		Name:         "Old Phone",
+		SharedSecret: secret,
+		PairedAt:     time.Now(),
+	}, store)
+	if err != nil {
+		t.Fatalf("AddPairedDevice() error: %v", err)
+	}
+
+	t.Run("updates matching device", func(t *testing.T) {
+		updated, err := UpdatePairedDeviceName(path, store, "mobile-1", "New Phone")
+		if err != nil {
+			t.Fatalf("UpdatePairedDeviceName() error: %v", err)
+		}
+		if !updated {
+			t.Error("expected updated=true, got false")
+		}
+
+		// Reload and verify name changed
+		device, err := LoadPairedDevice(path, store)
+		if err != nil {
+			t.Fatalf("LoadPairedDevice() error: %v", err)
+		}
+		if device.Name != "New Phone" {
+			t.Errorf("Name = %q, want %q", device.Name, "New Phone")
+		}
+	})
+
+	t.Run("ignores non-matching device", func(t *testing.T) {
+		updated, err := UpdatePairedDeviceName(path, store, "wrong-device-id", "Should Not Apply")
+		if err != nil {
+			t.Fatalf("UpdatePairedDeviceName() error: %v", err)
+		}
+		if updated {
+			t.Error("expected updated=false for non-matching device ID")
+		}
+
+		// Verify name unchanged
+		device, err := LoadPairedDevice(path, store)
+		if err != nil {
+			t.Fatalf("LoadPairedDevice() error: %v", err)
+		}
+		if device.Name != "New Phone" {
+			t.Errorf("Name = %q, want %q (should be unchanged)", device.Name, "New Phone")
+		}
+	})
+
+	t.Run("no-ops when name unchanged", func(t *testing.T) {
+		updated, err := UpdatePairedDeviceName(path, store, "mobile-1", "New Phone")
+		if err != nil {
+			t.Fatalf("UpdatePairedDeviceName() error: %v", err)
+		}
+		if updated {
+			t.Error("expected updated=false when name is the same")
+		}
+	})
+}
+
 func TestRemovePairedDevice_DeletesSecret(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "paired_devices.json")
