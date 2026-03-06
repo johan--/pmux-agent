@@ -116,12 +116,13 @@ func Run(ctx context.Context, paths config.Paths) error {
 		hostName = config.DefaultHostName()
 	}
 	signalingClient := webrtc.NewSignalingClient(identity, serverURL, hostName, func(msg webrtc.SignalingMessage) {
-		if msg.Type == "mobile_name_updated" && msg.DeviceID != "" && msg.Name != "" && len(msg.Name) <= auth.MaxMobileNameLen {
-			updated, err := auth.UpdatePairedDeviceName(paths.PairedDevices, store, msg.DeviceID, msg.Name)
+		if msg.Type == "mobile_name_updated" && msg.DeviceID != "" && msg.Name != "" {
+			truncatedName := auth.TruncateMobileName(msg.Name)
+			updated, err := auth.UpdatePairedDeviceName(paths.PairedDevices, store, msg.DeviceID, truncatedName)
 			if err != nil {
 				logger.Warn("failed to update mobile device name", "error", err)
 			} else if updated {
-				logger.Info("updated paired mobile device name", "deviceId", msg.DeviceID, "name", msg.Name)
+				logger.Info("updated paired mobile device name", "deviceId", msg.DeviceID, "name", truncatedName)
 			}
 			return
 		}

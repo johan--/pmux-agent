@@ -20,10 +20,12 @@ import (
 // This limit is enforced during both initial pairing and name-update flows.
 const MaxMobileNameLen = 64
 
-// TruncateMobileName truncates a mobile device name to MaxMobileNameLen characters.
+// TruncateMobileName truncates a mobile device name to MaxMobileNameLen runes.
+// It operates on Unicode code points to avoid splitting multi-byte characters.
 func TruncateMobileName(name string) string {
-	if len(name) > MaxMobileNameLen {
-		return name[:MaxMobileNameLen]
+	runes := []rune(name)
+	if len(runes) > MaxMobileNameLen {
+		return string(runes[:MaxMobileNameLen])
 	}
 	return name
 }

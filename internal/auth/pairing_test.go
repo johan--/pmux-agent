@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,6 +20,8 @@ func TestTruncateMobileName(t *testing.T) {
 		{"exactly 64 chars", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		{"65 chars truncated to 64", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		{"very long name", string(make([]byte, 1000)), string(make([]byte, 64))},
+		{"multi-byte emoji truncation", strings.Repeat("\U0001F4F1", 65), strings.Repeat("\U0001F4F1", 64)},
+		{"mixed ASCII and emoji", "Phone " + strings.Repeat("\U0001F600", 60), "Phone " + strings.Repeat("\U0001F600", 58)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
