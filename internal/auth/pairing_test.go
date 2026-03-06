@@ -8,6 +8,28 @@ import (
 	"time"
 )
 
+func TestTruncateMobileName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty string", "", ""},
+		{"short name", "My iPhone", "My iPhone"},
+		{"exactly 64 chars", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{"65 chars truncated to 64", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{"very long name", string(make([]byte, 1000)), string(make([]byte, 64))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TruncateMobileName(tt.input)
+			if got != tt.want {
+				t.Errorf("TruncateMobileName() = %q (len %d), want %q (len %d)", got, len(got), tt.want, len(tt.want))
+			}
+		})
+	}
+}
+
 func TestGenerateX25519Keypair(t *testing.T) {
 	kp, err := GenerateX25519Keypair()
 	if err != nil {
