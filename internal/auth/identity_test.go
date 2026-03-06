@@ -314,6 +314,57 @@ func TestLoadIdentity_FixesInsecurePermissions(t *testing.T) {
 	})
 }
 
+func TestValidateDeviceID(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      string
+		wantErr string // empty means valid
+	}{
+		{name: "valid 32-char hex", id: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", wantErr: ""},
+		{name: "valid all zeros", id: "00000000000000000000000000000000", wantErr: ""},
+		{name: "valid all f", id: "ffffffffffffffffffffffffffffffff", wantErr: ""},
+		{name: "empty string", id: "", wantErr: "must be 32 hex characters, got 0 chars"},
+		{name: "too short", id: "a1b2c3", wantErr: "must be 32 hex characters, got 6 chars"},
+		{name: "too long", id: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4ff", wantErr: "must be 32 hex characters, got 34 chars"},
+		{name: "uppercase hex", id: "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4", wantErr: "contains non-hex characters"},
+		{name: "mixed case", id: "a1B2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", wantErr: "contains non-hex characters"},
+		{name: "non-hex chars", id: "g1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", wantErr: "contains non-hex characters"},
+		{name: "special chars", id: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3!!", wantErr: "contains non-hex characters"},
+		{name: "path traversal", id: "../../etc/passwd................", wantErr: "contains non-hex characters"},
+		{name: "spaces", id: "a1b2c3d4 5f6a1b2c3d4e5f6a1b2c3d4", wantErr: "contains non-hex characters"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateDeviceID(tt.id)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("ValidateDeviceID(%q) unexpected error: %v", tt.id, err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("ValidateDeviceID(%q) = nil, want error containing %q", tt.id, tt.wantErr)
+				} else if !containsSubstring(err.Error(), tt.wantErr) {
+					t.Errorf("ValidateDeviceID(%q) error = %q, want substring %q", tt.id, err.Error(), tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateDeviceID_DeriveRoundTrip(t *testing.T) {
+	// A device ID produced by deriveDeviceID must always pass validation
+	keysDir := t.TempDir()
+	store := NewMemorySecretStore()
+	id, err := GenerateIdentity(keysDir, store)
+	if err != nil {
+		t.Fatalf("GenerateIdentity() error: %v", err)
+	}
+	if err := ValidateDeviceID(id.DeviceID); err != nil {
+		t.Errorf("ValidateDeviceID(deriveDeviceID()) error: %v", err)
+	}
+}
+
 func TestGenerateIdentity_Uniqueness(t *testing.T) {
 	dir1 := t.TempDir()
 	dir2 := t.TempDir()

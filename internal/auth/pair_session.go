@@ -174,6 +174,10 @@ func WaitForPairComplete(ctx context.Context, serverURL string, jwt string) (*Pa
 			}
 
 			if msg.Type == "pair_complete" {
+				if err := ValidateDeviceID(msg.MobileDeviceID); err != nil {
+					errCh <- fmt.Errorf("pair_complete: %w", err)
+					return
+				}
 				resultCh <- &msg
 				return
 			}

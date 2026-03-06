@@ -127,7 +127,7 @@ func TestInitiatePairing(t *testing.T) {
 
 func TestPairCompleteMessageDeserialization(t *testing.T) {
 	t.Run("deserializes mobileName", func(t *testing.T) {
-		raw := `{"type":"pair_complete","mobileDeviceId":"dev-123","mobileX25519PublicKey":"key==","mobileName":"My iPhone"}`
+		raw := `{"type":"pair_complete","mobileDeviceId":"dd44ee55ff66aa11bb22cc33dd44ee55","mobileX25519PublicKey":"key==","mobileName":"My iPhone"}`
 		var msg PairCompleteMessage
 		if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 			t.Fatalf("Unmarshal error: %v", err)
@@ -135,8 +135,8 @@ func TestPairCompleteMessageDeserialization(t *testing.T) {
 		if msg.Type != "pair_complete" {
 			t.Errorf("Type = %q, want %q", msg.Type, "pair_complete")
 		}
-		if msg.MobileDeviceID != "dev-123" {
-			t.Errorf("MobileDeviceID = %q, want %q", msg.MobileDeviceID, "dev-123")
+		if msg.MobileDeviceID != "dd44ee55ff66aa11bb22cc33dd44ee55" {
+			t.Errorf("MobileDeviceID = %q, want %q", msg.MobileDeviceID, "dd44ee55ff66aa11bb22cc33dd44ee55")
 		}
 		if msg.MobileX25519PublicKey != "key==" {
 			t.Errorf("MobileX25519PublicKey = %q, want %q", msg.MobileX25519PublicKey, "key==")
@@ -147,13 +147,13 @@ func TestPairCompleteMessageDeserialization(t *testing.T) {
 	})
 
 	t.Run("handles missing mobileName", func(t *testing.T) {
-		raw := `{"type":"pair_complete","mobileDeviceId":"dev-456","mobileX25519PublicKey":"key2=="}`
+		raw := `{"type":"pair_complete","mobileDeviceId":"ee55ff66aa11bb22cc33dd44ee55ff66","mobileX25519PublicKey":"key2=="}`
 		var msg PairCompleteMessage
 		if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 			t.Fatalf("Unmarshal error: %v", err)
 		}
-		if msg.MobileDeviceID != "dev-456" {
-			t.Errorf("MobileDeviceID = %q, want %q", msg.MobileDeviceID, "dev-456")
+		if msg.MobileDeviceID != "ee55ff66aa11bb22cc33dd44ee55ff66" {
+			t.Errorf("MobileDeviceID = %q, want %q", msg.MobileDeviceID, "ee55ff66aa11bb22cc33dd44ee55ff66")
 		}
 		if msg.MobileName != "" {
 			t.Errorf("MobileName = %q, want empty string", msg.MobileName)
@@ -192,7 +192,7 @@ func TestWaitForPairComplete(t *testing.T) {
 			// Send pair_complete
 			pairMsg := PairCompleteMessage{
 				Type:                  "pair_complete",
-				MobileDeviceID:        "mobile-xyz",
+				MobileDeviceID:        "bb22cc33dd44ee55ff66aa11bb22cc33",
 				MobileX25519PublicKey: "mobileX25519Key==",
 			}
 			data, _ := json.Marshal(pairMsg)
@@ -207,8 +207,8 @@ func TestWaitForPairComplete(t *testing.T) {
 		if err != nil {
 			t.Fatalf("WaitForPairComplete() error: %v", err)
 		}
-		if msg.MobileDeviceID != "mobile-xyz" {
-			t.Errorf("mobileDeviceId = %q, want %q", msg.MobileDeviceID, "mobile-xyz")
+		if msg.MobileDeviceID != "bb22cc33dd44ee55ff66aa11bb22cc33" {
+			t.Errorf("mobileDeviceId = %q, want %q", msg.MobileDeviceID, "bb22cc33dd44ee55ff66aa11bb22cc33")
 		}
 		if msg.MobileX25519PublicKey != "mobileX25519Key==" {
 			t.Errorf("mobileX25519PublicKey = %q, want %q", msg.MobileX25519PublicKey, "mobileX25519Key==")
@@ -232,7 +232,7 @@ func TestWaitForPairComplete(t *testing.T) {
 			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"presence_ack"}`))
 
 			// Then send pair_complete
-			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"pair_complete","mobileDeviceId":"m1","mobileX25519PublicKey":"key=="}`))
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"pair_complete","mobileDeviceId":"cc33dd44ee55ff66aa11bb22cc33dd44","mobileX25519PublicKey":"key=="}`))
 		}))
 		defer server.Close()
 
@@ -243,8 +243,8 @@ func TestWaitForPairComplete(t *testing.T) {
 		if err != nil {
 			t.Fatalf("WaitForPairComplete() error: %v", err)
 		}
-		if msg.MobileDeviceID != "m1" {
-			t.Errorf("mobileDeviceId = %q, want %q", msg.MobileDeviceID, "m1")
+		if msg.MobileDeviceID != "cc33dd44ee55ff66aa11bb22cc33dd44" {
+			t.Errorf("mobileDeviceId = %q, want %q", msg.MobileDeviceID, "cc33dd44ee55ff66aa11bb22cc33dd44")
 		}
 	})
 
@@ -275,6 +275,36 @@ func TestWaitForPairComplete(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "timed out") {
 			t.Errorf("error = %q, want substring %q", err.Error(), "timed out")
+		}
+	})
+
+	t.Run("rejects invalid MobileDeviceID format", func(t *testing.T) {
+		upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+
+			conn.ReadMessage() // auth
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_ok"}`))
+
+			// Send pair_complete with an invalid device ID (not 32 hex chars)
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"pair_complete","mobileDeviceId":"INVALID-ID!","mobileX25519PublicKey":"key=="}`))
+		}))
+		defer server.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := WaitForPairComplete(ctx, server.URL, "test-jwt")
+		if err == nil {
+			t.Fatal("expected validation error, got nil")
+		}
+		if !strings.Contains(err.Error(), "invalid device ID") {
+			t.Errorf("error = %q, want substring %q", err.Error(), "invalid device ID")
 		}
 	})
 

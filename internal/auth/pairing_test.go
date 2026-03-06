@@ -171,8 +171,8 @@ func TestPairedDeviceStorage(t *testing.T) {
 		secret2 := base64.StdEncoding.EncodeToString([]byte("secret-data-2"))
 
 		devices := []PairedDevice{
-			{DeviceID: "mobile-1", SharedSecret: secret1, PairedAt: now},
-			{DeviceID: "mobile-2", SharedSecret: secret2, PairedAt: now},
+			{DeviceID: "aa11bb22cc33dd44ee55ff66aa11bb22", SharedSecret: secret1, PairedAt: now},
+			{DeviceID: "bb22cc33dd44ee55ff66aa11bb22cc33", SharedSecret: secret2, PairedAt: now},
 		}
 
 		// Use AddPairedDevice to store secrets in store and metadata on disk
@@ -191,8 +191,8 @@ func TestPairedDeviceStorage(t *testing.T) {
 		if len(loaded) != 1 {
 			t.Fatalf("loaded %d devices, want 1 (single-pairing)", len(loaded))
 		}
-		if loaded[0].DeviceID != "mobile-2" {
-			t.Errorf("loaded[0].DeviceID = %q, want %q", loaded[0].DeviceID, "mobile-2")
+		if loaded[0].DeviceID != "bb22cc33dd44ee55ff66aa11bb22cc33" {
+			t.Errorf("loaded[0].DeviceID = %q, want %q", loaded[0].DeviceID, "bb22cc33dd44ee55ff66aa11bb22cc33")
 		}
 		if loaded[0].SharedSecret == "" {
 			t.Error("loaded[0].SharedSecret should not be empty")
@@ -229,7 +229,7 @@ func TestAddPairedDevice(t *testing.T) {
 	t.Run("adds first device", func(t *testing.T) {
 		secret := base64.StdEncoding.EncodeToString([]byte("first-secret"))
 		err := AddPairedDevice(path, PairedDevice{
-			DeviceID:     "mobile-1",
+			DeviceID:     "aa11bb22cc33dd44ee55ff66aa11bb22",
 			SharedSecret: secret,
 			PairedAt:     time.Now(),
 		}, store)
@@ -241,15 +241,15 @@ func TestAddPairedDevice(t *testing.T) {
 		if len(devices) != 1 {
 			t.Fatalf("expected 1 device, got %d", len(devices))
 		}
-		if devices[0].DeviceID != "mobile-1" {
-			t.Errorf("DeviceID = %q, want %q", devices[0].DeviceID, "mobile-1")
+		if devices[0].DeviceID != "aa11bb22cc33dd44ee55ff66aa11bb22" {
+			t.Errorf("DeviceID = %q, want %q", devices[0].DeviceID, "aa11bb22cc33dd44ee55ff66aa11bb22")
 		}
 	})
 
 	t.Run("re-pairing replaces existing device", func(t *testing.T) {
 		newSecret := base64.StdEncoding.EncodeToString([]byte("new-secret-data"))
 		err := AddPairedDevice(path, PairedDevice{
-			DeviceID:     "mobile-1",
+			DeviceID:     "aa11bb22cc33dd44ee55ff66aa11bb22",
 			SharedSecret: newSecret,
 			PairedAt:     time.Now(),
 		}, store)
@@ -262,7 +262,7 @@ func TestAddPairedDevice(t *testing.T) {
 			t.Fatalf("expected 1 device, got %d", len(devices))
 		}
 		// Verify the shared secret was updated in the store
-		secretBytes, err := store.Get(SharedSecretKey("mobile-1"))
+		secretBytes, err := store.Get(SharedSecretKey("aa11bb22cc33dd44ee55ff66aa11bb22"))
 		if err != nil {
 			t.Fatalf("store.Get() error: %v", err)
 		}
@@ -283,7 +283,7 @@ func TestAddPairedDevice_ReplacesAll(t *testing.T) {
 
 	// Add device A
 	err := AddPairedDevice(path, PairedDevice{
-		DeviceID:     "device-A",
+		DeviceID:     "cc33dd44ee55ff66aa11bb22cc33dd44",
 		SharedSecret: secretA,
 		PairedAt:     time.Now(),
 	}, store)
@@ -292,13 +292,13 @@ func TestAddPairedDevice_ReplacesAll(t *testing.T) {
 	}
 
 	devices, _ := LoadPairedDevices(path, store)
-	if len(devices) != 1 || devices[0].DeviceID != "device-A" {
+	if len(devices) != 1 || devices[0].DeviceID != "cc33dd44ee55ff66aa11bb22cc33dd44" {
 		t.Fatalf("after adding A: expected [device-A], got %v", devices)
 	}
 
 	// Add device B — should replace A entirely
 	err = AddPairedDevice(path, PairedDevice{
-		DeviceID:     "device-B",
+		DeviceID:     "dd44ee55ff66aa11bb22cc33dd44ee55",
 		SharedSecret: secretB,
 		PairedAt:     time.Now(),
 	}, store)
@@ -310,11 +310,11 @@ func TestAddPairedDevice_ReplacesAll(t *testing.T) {
 	if len(devices) != 1 {
 		t.Fatalf("expected exactly 1 device after replacing, got %d", len(devices))
 	}
-	if devices[0].DeviceID != "device-B" {
-		t.Errorf("DeviceID = %q, want %q", devices[0].DeviceID, "device-B")
+	if devices[0].DeviceID != "dd44ee55ff66aa11bb22cc33dd44ee55" {
+		t.Errorf("DeviceID = %q, want %q", devices[0].DeviceID, "dd44ee55ff66aa11bb22cc33dd44ee55")
 	}
 	// Verify shared secret is in store
-	secretBytes, err := store.Get(SharedSecretKey("device-B"))
+	secretBytes, err := store.Get(SharedSecretKey("dd44ee55ff66aa11bb22cc33dd44ee55"))
 	if err != nil {
 		t.Fatalf("store.Get() error: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestLoadPairedDevice_Singular(t *testing.T) {
 
 		// Add device via AddPairedDevice to store secret properly
 		err := AddPairedDevice(path, PairedDevice{
-			DeviceID:     "mobile-1",
+			DeviceID:     "aa11bb22cc33dd44ee55ff66aa11bb22",
 			SharedSecret: secret,
 			PairedAt:     now,
 		}, store)
@@ -373,8 +373,8 @@ func TestLoadPairedDevice_Singular(t *testing.T) {
 		if device == nil {
 			t.Fatal("expected non-nil device")
 		}
-		if device.DeviceID != "mobile-1" {
-			t.Errorf("DeviceID = %q, want %q", device.DeviceID, "mobile-1")
+		if device.DeviceID != "aa11bb22cc33dd44ee55ff66aa11bb22" {
+			t.Errorf("DeviceID = %q, want %q", device.DeviceID, "aa11bb22cc33dd44ee55ff66aa11bb22")
 		}
 		if device.SharedSecret == "" {
 			t.Error("SharedSecret should not be empty (loaded from store)")
@@ -390,7 +390,7 @@ func TestUpdatePairedDeviceName(t *testing.T) {
 	// Set up a paired device with a name
 	secret := base64.StdEncoding.EncodeToString([]byte("test-secret"))
 	err := AddPairedDevice(path, PairedDevice{
-		DeviceID:     "mobile-1",
+		DeviceID:     "aa11bb22cc33dd44ee55ff66aa11bb22",
 		Name:         "Old Phone",
 		SharedSecret: secret,
 		PairedAt:     time.Now(),
@@ -400,7 +400,7 @@ func TestUpdatePairedDeviceName(t *testing.T) {
 	}
 
 	t.Run("updates matching device", func(t *testing.T) {
-		updated, err := UpdatePairedDeviceName(path, store, "mobile-1", "New Phone")
+		updated, err := UpdatePairedDeviceName(path, store, "aa11bb22cc33dd44ee55ff66aa11bb22", "New Phone")
 		if err != nil {
 			t.Fatalf("UpdatePairedDeviceName() error: %v", err)
 		}
@@ -438,7 +438,7 @@ func TestUpdatePairedDeviceName(t *testing.T) {
 	})
 
 	t.Run("no-ops when name unchanged", func(t *testing.T) {
-		updated, err := UpdatePairedDeviceName(path, store, "mobile-1", "New Phone")
+		updated, err := UpdatePairedDeviceName(path, store, "aa11bb22cc33dd44ee55ff66aa11bb22", "New Phone")
 		if err != nil {
 			t.Fatalf("UpdatePairedDeviceName() error: %v", err)
 		}
@@ -454,7 +454,7 @@ func TestRemovePairedDevice_DeletesSecret(t *testing.T) {
 	store := NewMemorySecretStore()
 
 	err := AddPairedDevice(path, PairedDevice{
-		DeviceID:     "mobile-1",
+		DeviceID:     "aa11bb22cc33dd44ee55ff66aa11bb22",
 		SharedSecret: base64.StdEncoding.EncodeToString([]byte("test-secret-value")),
 		PairedAt:     time.Now(),
 	}, store)
@@ -463,19 +463,19 @@ func TestRemovePairedDevice_DeletesSecret(t *testing.T) {
 	}
 
 	// Verify secret exists
-	_, err = store.Get(SharedSecretKey("mobile-1"))
+	_, err = store.Get(SharedSecretKey("aa11bb22cc33dd44ee55ff66aa11bb22"))
 	if err != nil {
 		t.Fatalf("secret should exist before removal: %v", err)
 	}
 
 	// Remove the device
-	err = RemovePairedDevice(path, "mobile-1", store)
+	err = RemovePairedDevice(path, "aa11bb22cc33dd44ee55ff66aa11bb22", store)
 	if err != nil {
 		t.Fatalf("RemovePairedDevice() error: %v", err)
 	}
 
 	// Verify secret is deleted
-	_, err = store.Get(SharedSecretKey("mobile-1"))
+	_, err = store.Get(SharedSecretKey("aa11bb22cc33dd44ee55ff66aa11bb22"))
 	if err == nil {
 		t.Error("expected error after secret deletion, got nil")
 	}
