@@ -5,14 +5,14 @@ import (
 	"io"
 
 	"github.com/shiftinbits/pmux-agent/internal/auth"
-	"github.com/shiftinbits/pmux-agent/internal/protocol"
 	"github.com/shiftinbits/pmux-agent/internal/service"
+	"github.com/shiftinbits/pmux-agent/internal/tmux"
 )
 
 // SessionLister abstracts tmux session listing for testability.
 // tmux.Client satisfies this interface.
 type SessionLister interface {
-	ListSessions() ([]protocol.TmuxSession, error)
+	ListSessions() ([]tmux.Session, error)
 }
 
 // StatusParams holds all dependencies for the RunStatus command.
