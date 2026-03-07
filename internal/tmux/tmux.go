@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/shiftinbits/pmux-agent/internal/protocol"
 )
 
 const (
@@ -36,6 +34,41 @@ var ErrInvalidTarget = errors.New("invalid tmux target")
 
 // DefaultSocket is the tmux socket name used by pmux.
 const DefaultSocket = "pmux"
+
+// Session represents a tmux session.
+type Session struct {
+	ID             string
+	Name           string
+	CreatedAt      int64
+	LastActivityAt int64
+	Attached       bool
+	Windows        []Window
+}
+
+// Window represents a tmux window within a session.
+type Window struct {
+	ID     string
+	Name   string
+	Index  int
+	Active bool
+	Panes  []Pane
+}
+
+// Pane represents a tmux pane within a window.
+type Pane struct {
+	ID             string
+	Index          int
+	Active         bool
+	Size           PaneSize
+	Title          string
+	CurrentCommand string
+}
+
+// PaneSize holds terminal dimensions.
+type PaneSize struct {
+	Cols int
+	Rows int
+}
 
 // Client wraps the tmux CLI, targeting the dedicated pmux socket.
 type Client struct {
@@ -111,7 +144,7 @@ func (c *Client) Version() (string, error) {
 }
 
 // ListSessions returns all sessions on the pmux socket.
-func (c *Client) ListSessions() ([]protocol.TmuxSession, error) {
+func (c *Client) ListSessions() ([]Session, error) {
 	// Format: session_id|session_name|session_created|session_last_activity|session_attached
 	format := "#{session_id}|#{session_name}|#{session_created}|#{session_last_activity}|#{session_attached}"
 	out, err := c.run("list-sessions", "-F", format)
@@ -135,7 +168,7 @@ func (c *Client) ListSessions() ([]protocol.TmuxSession, error) {
 		return nil, nil
 	}
 
-	var sessions []protocol.TmuxSession
+	var sessions []Session
 	for _, line := range strings.Split(out, "\n") {
 		parts := strings.SplitN(line, "|", 5)
 		if len(parts) != 5 {
@@ -145,7 +178,7 @@ func (c *Client) ListSessions() ([]protocol.TmuxSession, error) {
 		lastActivityAt, _ := strconv.ParseInt(parts[3], 10, 64)
 		attached := parts[4] == "1"
 
-		sessions = append(sessions, protocol.TmuxSession{
+		sessions = append(sessions, Session{
 			ID:             parts[0],
 			Name:           parts[1],
 			CreatedAt:      createdAt,
@@ -157,7 +190,7 @@ func (c *Client) ListSessions() ([]protocol.TmuxSession, error) {
 }
 
 // ListWindows returns all windows for a given session.
-func (c *Client) ListWindows(sessionID string) ([]protocol.TmuxWindow, error) {
+func (c *Client) ListWindows(sessionID string) ([]Window, error) {
 	if err := validateTarget(sessionID); err != nil {
 		return nil, fmt.Errorf("list-windows: %w", err)
 	}
@@ -173,7 +206,7 @@ func (c *Client) ListWindows(sessionID string) ([]protocol.TmuxWindow, error) {
 		return nil, nil
 	}
 
-	var windows []protocol.TmuxWindow
+	var windows []Window
 	for _, line := range strings.Split(out, "\n") {
 		parts := strings.SplitN(line, "|", 4)
 		if len(parts) != 4 {
@@ -182,7 +215,7 @@ func (c *Client) ListWindows(sessionID string) ([]protocol.TmuxWindow, error) {
 		index, _ := strconv.Atoi(parts[2])
 		active := parts[3] == "1"
 
-		windows = append(windows, protocol.TmuxWindow{
+		windows = append(windows, Window{
 			ID:     parts[0],
 			Name:   parts[1],
 			Index:  index,
@@ -193,7 +226,7 @@ func (c *Client) ListWindows(sessionID string) ([]protocol.TmuxWindow, error) {
 }
 
 // ListPanes returns all panes for a given window target (e.g. "$1:@0").
-func (c *Client) ListPanes(windowTarget string) ([]protocol.TmuxPane, error) {
+func (c *Client) ListPanes(windowTarget string) ([]Pane, error) {
 	if err := validateTarget(windowTarget); err != nil {
 		return nil, fmt.Errorf("list-panes: %w", err)
 	}
@@ -209,7 +242,7 @@ func (c *Client) ListPanes(windowTarget string) ([]protocol.TmuxPane, error) {
 		return nil, nil
 	}
 
-	var panes []protocol.TmuxPane
+	var panes []Pane
 	for _, line := range strings.Split(out, "\n") {
 		parts := strings.SplitN(line, "|", 7)
 		if len(parts) != 7 {
@@ -220,11 +253,11 @@ func (c *Client) ListPanes(windowTarget string) ([]protocol.TmuxPane, error) {
 		cols, _ := strconv.Atoi(parts[3])
 		rows, _ := strconv.Atoi(parts[4])
 
-		panes = append(panes, protocol.TmuxPane{
+		panes = append(panes, Pane{
 			ID:             parts[0],
 			Index:          index,
 			Active:         active,
-			Size:           protocol.PaneSize{Cols: cols, Rows: rows},
+			Size:           PaneSize{Cols: cols, Rows: rows},
 			Title:          parts[5],
 			CurrentCommand: parts[6],
 		})
@@ -233,7 +266,7 @@ func (c *Client) ListPanes(windowTarget string) ([]protocol.TmuxPane, error) {
 }
 
 // ListAll returns the full session tree (sessions → windows → panes).
-func (c *Client) ListAll() ([]protocol.TmuxSession, error) {
+func (c *Client) ListAll() ([]Session, error) {
 	sessions, err := c.ListSessions()
 	if err != nil {
 		return nil, err

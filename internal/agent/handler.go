@@ -181,7 +181,7 @@ func (h *Handler) handleListSessions(peerID string) {
 
 	if err := h.sendMsg(peerID, &protocol.SessionsEvent{
 		Type:     "sessions",
-		Sessions: sessions,
+		Sessions: toProtocolSessions(sessions),
 	}); err != nil {
 		h.logger.Warn("failed to send sessions event", "peer", peerID, "error", err)
 	}
@@ -244,7 +244,7 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 			if sessions, listErr := h.tmux.ListAll(); listErr == nil {
 				h.sendMsg(peerID, &protocol.SessionsEvent{
 					Type:     "sessions",
-					Sessions: sessions,
+					Sessions: toProtocolSessions(sessions),
 				})
 			}
 			return
@@ -469,7 +469,7 @@ func (h *Handler) handlePaneExit(peerID string) {
 	} else {
 		if err := h.sendMsg(peerID, &protocol.SessionsEvent{
 			Type:     "sessions",
-			Sessions: sessions,
+			Sessions: toProtocolSessions(sessions),
 		}); err != nil {
 			h.logger.Error("failed to send sessions after pane close", "peer", peerID, "error", err)
 		} else {
@@ -556,4 +556,49 @@ func (h *Handler) sendError(peerID string, code string, message string) {
 		h.logger.Warn("failed to send error to peer",
 			"peer", peerID, "code", code, "sendError", err)
 	}
+}
+
+// toProtocolSessions converts tmux domain types to protocol wire types.
+func toProtocolSessions(sessions []tmux.Session) []protocol.TmuxSession {
+	result := make([]protocol.TmuxSession, len(sessions))
+	for i, s := range sessions {
+		result[i] = protocol.TmuxSession{
+			ID:             s.ID,
+			Name:           s.Name,
+			CreatedAt:      s.CreatedAt,
+			LastActivityAt: s.LastActivityAt,
+			Attached:       s.Attached,
+			Windows:        toProtocolWindows(s.Windows),
+		}
+	}
+	return result
+}
+
+func toProtocolWindows(windows []tmux.Window) []protocol.TmuxWindow {
+	result := make([]protocol.TmuxWindow, len(windows))
+	for i, w := range windows {
+		result[i] = protocol.TmuxWindow{
+			ID:     w.ID,
+			Name:   w.Name,
+			Index:  w.Index,
+			Active: w.Active,
+			Panes:  toProtocolPanes(w.Panes),
+		}
+	}
+	return result
+}
+
+func toProtocolPanes(panes []tmux.Pane) []protocol.TmuxPane {
+	result := make([]protocol.TmuxPane, len(panes))
+	for i, p := range panes {
+		result[i] = protocol.TmuxPane{
+			ID:             p.ID,
+			Index:          p.Index,
+			Active:         p.Active,
+			Size:           protocol.PaneSize{Cols: p.Size.Cols, Rows: p.Size.Rows},
+			Title:          p.Title,
+			CurrentCommand: p.CurrentCommand,
+		}
+	}
+	return result
 }

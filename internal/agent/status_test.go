@@ -9,18 +9,18 @@ import (
 	"testing"
 
 	"github.com/shiftinbits/pmux-agent/internal/auth"
-	"github.com/shiftinbits/pmux-agent/internal/protocol"
 	"github.com/shiftinbits/pmux-agent/internal/service"
+	"github.com/shiftinbits/pmux-agent/internal/tmux"
 )
 
 // --- Test mocks ---
 
 type mockSessionLister struct {
-	sessions []protocol.TmuxSession
+	sessions []tmux.Session
 	err      error
 }
 
-func (m *mockSessionLister) ListSessions() ([]protocol.TmuxSession, error) {
+func (m *mockSessionLister) ListSessions() ([]tmux.Session, error) {
 	return m.sessions, m.err
 }
 
@@ -100,7 +100,7 @@ func TestRunStatus_WithDevice(t *testing.T) {
 	params.PairedDevicesPath = path
 	params.ServiceManager = &mockServiceManager{installed: true}
 	params.Sessions = &mockSessionLister{
-		sessions: []protocol.TmuxSession{
+		sessions: []tmux.Session{
 			{ID: "$0", Name: "main"},
 			{ID: "$1", Name: "work"},
 		},
