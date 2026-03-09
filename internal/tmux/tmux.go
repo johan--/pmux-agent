@@ -311,6 +311,9 @@ func (c *Client) CreateSession(name string, command string) (string, error) {
 
 // KillSession kills a tmux session by ID or name.
 func (c *Client) KillSession(session string) error {
+	if err := validateTarget(session); err != nil {
+		return err
+	}
 	out, err := c.run("kill-session", "-t", session)
 	if err != nil {
 		return fmt.Errorf("kill-session: %w: %s", err, out)
