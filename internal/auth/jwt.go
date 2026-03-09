@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// TokenResponse represents the server's response to a token exchange request.
-type TokenResponse struct {
+// tokenResponse represents the server's response to a token exchange request (internal-only).
+type tokenResponse struct {
 	Token string `json:"token"`
 	Error string `json:"error,omitempty"`
 }
@@ -54,7 +54,7 @@ func ExchangeToken(id *Identity, serverURL string, client *http.Client) (string,
 		return "", errors.New(serverError(resp.StatusCode, respBody))
 	}
 
-	var tokenResp TokenResponse
+	var tokenResp tokenResponse
 	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
 		return "", fmt.Errorf("parse token response: %w", err)
 	}
