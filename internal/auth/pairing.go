@@ -88,7 +88,8 @@ func (kp *X25519Keypair) ComputeSharedSecret(peerPubKeyBase64 string) (string, e
 
 	// Derive key material using HKDF (RFC 5869) — raw X25519 output
 	// is not uniformly distributed and should never be used directly.
-	hkdfReader := hkdf.New(sha256.New, raw, nil, []byte("pocketmux-pairing-v1"))
+	// Salt: "pocketmux", Info: "pocketmux-pairing-v1"
+	hkdfReader := hkdf.New(sha256.New, raw, []byte("pocketmux"), []byte("pocketmux-pairing-v1"))
 	derived := make([]byte, 32)
 	if _, err := io.ReadFull(hkdfReader, derived); err != nil {
 		return "", fmt.Errorf("derive shared secret via HKDF: %w", err)
