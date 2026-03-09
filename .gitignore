@@ -9,3 +9,10 @@ dist/
 *.test
 *.out
 .DS_Store
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
