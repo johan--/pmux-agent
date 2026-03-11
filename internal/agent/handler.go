@@ -37,11 +37,12 @@ type Handler struct {
 	ctx          context.Context // agent lifecycle context
 
 	mu           sync.Mutex
-	bridges      map[string]*tmux.PaneBridge  // per-peer attached bridge
-	cancels      map[string]context.CancelFunc // per-peer streamOutput cancel
-	paneForPeer  map[string]string            // peerID -> paneID (for restore on detach)
-	lastPingTime map[string]time.Time         // peerID -> last ping received
-	lastDims     map[string][2]int            // peerID -> [cols, rows] to skip redundant resizes
+	bridges      map[string]*tmux.PaneBridge              // per-peer attached bridge
+	cancels      map[string]context.CancelFunc             // per-peer streamOutput cancel
+	paneForPeer  map[string]string                        // peerID -> paneID (for restore on detach)
+	lastPingTime map[string]time.Time                     // peerID -> last ping received
+	lastDims     map[string][2]int                        // peerID -> [cols, rows] to skip redundant resizes
+	compressors  map[string]*protocol.OutputCompressor    // per-peer stateful deflate compressor
 }
 
 // NewHandler creates a protocol message handler.
@@ -57,6 +58,7 @@ func NewHandler(tmuxClient *tmux.Client, send SendFunc, logger *slog.Logger) *Ha
 		paneForPeer:  make(map[string]string),
 		lastPingTime: make(map[string]time.Time),
 		lastDims:     make(map[string][2]int),
+		compressors:  make(map[string]*protocol.OutputCompressor),
 	}
 }
 
@@ -268,11 +270,19 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 	h.lastDims[peerID] = [2]int{req.Cols, req.Rows}
 	h.mu.Unlock()
 
-	// Send attached confirmation
-	h.sendMsg(peerID, &protocol.AttachedEvent{
+	// Build attached event — echo compression if negotiated
+	attachedEvent := &protocol.AttachedEvent{
 		Type:   "attached",
 		PaneID: req.PaneID,
-	})
+	}
+	if req.Compression == "deflate" {
+		compressor := protocol.NewOutputCompressor()
+		h.mu.Lock()
+		h.compressors[peerID] = compressor
+		h.mu.Unlock()
+		attachedEvent.Compression = "deflate"
+	}
+	h.sendMsg(peerID, attachedEvent)
 
 	// Skip initial capture-pane content on fresh attach — the captured buffer
 	// contains prompts reflowed from the computer's wider terminal, producing
@@ -281,9 +291,20 @@ func (h *Handler) handleAttach(peerID string, req *protocol.AttachRequest) {
 	// On reattach, send initial content so the mobile can restore its buffer.
 	if req.Reattach {
 		if initial := bridge.InitialContent(); initial != "" {
+			initialData := []byte(initial)
+			h.mu.Lock()
+			compressor := h.compressors[peerID]
+			h.mu.Unlock()
+			if compressor != nil {
+				if compressed, err := compressor.Compress(initialData); err == nil {
+					initialData = compressed
+				} else {
+					h.logger.Warn("failed to compress initial content", "peer", peerID, "error", err)
+				}
+			}
 			h.sendMsg(peerID, &protocol.OutputEvent{
 				Type: "output",
-				Data: []byte(initial),
+				Data: initialData,
 			})
 		}
 	}
@@ -428,6 +449,28 @@ func (h *Handler) streamOutput(ctx context.Context, peerID string, bridge *tmux.
 		data := make([]byte, len(filtered))
 		copy(data, filtered)
 
+		// Compress output data if compression is active for this peer
+		h.mu.Lock()
+		compressor := h.compressors[peerID]
+		h.mu.Unlock()
+
+		if compressor != nil {
+			compressed, err := compressor.Compress(data)
+			if err != nil {
+				h.logger.Warn("output compression failed, disabling for peer",
+					"peer", peerID, "error", err)
+				h.mu.Lock()
+				if c := h.compressors[peerID]; c != nil {
+					c.Close()
+					delete(h.compressors, peerID)
+				}
+				h.mu.Unlock()
+				// Fall through to send uncompressed data
+			} else {
+				data = compressed
+			}
+		}
+
 		if err := h.sendMsg(peerID, &protocol.OutputEvent{
 			Type: "output",
 			Data: data,
@@ -513,11 +556,13 @@ func (h *Handler) detachPeer(peerID string) {
 	bridge, ok := h.bridges[peerID]
 	cancel := h.cancels[peerID]
 	paneID := h.paneForPeer[peerID]
+	compressor := h.compressors[peerID]
 	if ok {
 		delete(h.bridges, peerID)
 		delete(h.cancels, peerID)
 		delete(h.paneForPeer, peerID)
 		delete(h.lastDims, peerID)
+		delete(h.compressors, peerID)
 	}
 	h.mu.Unlock()
 
@@ -529,6 +574,10 @@ func (h *Handler) detachPeer(peerID string) {
 
 	if ok {
 		bridge.Close()
+	}
+
+	if compressor != nil {
+		compressor.Close()
 	}
 
 	// Auto-resize pane window if this was the last mobile attached
