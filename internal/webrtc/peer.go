@@ -326,6 +326,11 @@ func (pm *PeerManager) handleConnectRequest(mobileDeviceID string) {
 			}
 		}
 		config.ICEServers = iceServers
+
+		// Log ICE server configuration for diagnostics
+		for i, srv := range iceServers {
+			pm.logger.Info("ICE server configured", "index", i, "urls", srv.URLs, "hasCredentials", srv.Username != "")
+		}
 	}
 
 	var pc *webrtc.PeerConnection
@@ -441,6 +446,8 @@ func (pm *PeerManager) handleSDPAnswer(mobileDeviceID string, sdp string) {
 
 // handleICECandidate adds an ICE candidate from the mobile peer.
 func (pm *PeerManager) handleICECandidate(mobileDeviceID string, candidate string, sdpMid string, sdpMLineIndex *int) {
+	pm.logger.Debug("ICE candidate received from mobile", "mobile", mobileDeviceID, "candidate", candidate)
+
 	pm.mu.Lock()
 	peer, ok := pm.peers[mobileDeviceID]
 	pm.mu.Unlock()
@@ -476,6 +483,7 @@ func (pm *PeerManager) fetchTurnCredentials() ([]webrtc.ICEServer, error) {
 	if len(pm.turnCache) > 0 && time.Since(pm.turnCacheTime) < turnCacheTTL {
 		cached := pm.turnCache
 		pm.mu.Unlock()
+		pm.logger.Debug("using cached TURN credentials", "age", time.Since(pm.turnCacheTime).Round(time.Second))
 		return cached, nil
 	}
 	pm.mu.Unlock()
@@ -508,6 +516,8 @@ func (pm *PeerManager) fetchTurnCredentials() ([]webrtc.ICEServer, error) {
 	if err := json.Unmarshal(body, &creds); err != nil {
 		return nil, fmt.Errorf("parse TURN credentials: %w", err)
 	}
+
+	pm.logger.Info("TURN credentials fetched", "urls", creds.URLs, "hasUsername", creds.Username != "", "hasCredential", creds.Credential != "")
 
 	servers := []webrtc.ICEServer{{
 		URLs:       creds.URLs,
@@ -685,8 +695,10 @@ func (pm *PeerManager) attemptICERestart(deviceID string) {
 func (p *Peer) setupHandlers() {
 	p.conn.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
+			p.logger.Debug("ICE gathering complete")
 			return
 		}
+		p.logger.Debug("ICE candidate gathered", "type", c.Typ.String(), "address", c.Address, "port", c.Port, "protocol", c.Protocol.String())
 		init := c.ToJSON()
 
 		var mLineIndex *int
