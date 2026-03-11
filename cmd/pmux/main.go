@@ -503,11 +503,15 @@ func handleUnpair() {
 }
 
 func handleUninstall(args []string) {
-	// Parse --keep-config flag
+	// Parse flags
 	keepConfig := false
+	skipConfirm := false
 	for _, arg := range args {
-		if arg == "--keep-config" {
+		switch arg {
+		case "--keep-config":
 			keepConfig = true
+		case "--yes", "-y":
+			skipConfirm = true
 		}
 	}
 
@@ -530,7 +534,7 @@ func handleUninstall(args []string) {
 	exe, _ := os.Executable()
 	mgr := service.NewManager(exe, paths.ConfigDir)
 
-	if err := agent.RunUninstall(paths, store, mgr, keepConfig, hmacSecret, false, os.Stdin, os.Stdout); err != nil {
+	if err := agent.RunUninstall(paths, store, mgr, keepConfig, hmacSecret, skipConfirm, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
 	}
@@ -865,7 +869,7 @@ PocketMux commands:
   config            Show effective configuration with sources
   status            Show agent, service, and pairing status
   unpair            Remove the paired mobile device
-  uninstall         Remove PocketMux completely (reverses 'init')
+  uninstall [-y]    Remove PocketMux completely (reverses 'init')
   agent run         Run the agent in the foreground
   agent start       Start the agent
   agent stop        Stop the agent
