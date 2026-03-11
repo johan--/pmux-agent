@@ -201,6 +201,17 @@ func runAgent(cpuProfile, memProfile string) {
 }
 
 func handleInit() {
+	// tmux is a hard prerequisite — check before doing anything else.
+	tmuxPath, err := exec.LookPath("tmux")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ tmux is not installed or not found in PATH.\n")
+		fmt.Fprintf(os.Stderr, "  tmux is a prerequisite for pmux. Install it first:\n")
+		fmt.Fprintf(os.Stderr, "    macOS:  brew install tmux\n")
+		fmt.Fprintf(os.Stderr, "    Ubuntu: sudo apt install tmux\n")
+		fmt.Fprintf(os.Stderr, "    Fedora: sudo dnf install tmux\n")
+		os.Exit(1)
+	}
+
 	paths, err := config.DefaultPaths()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
@@ -251,13 +262,6 @@ func handleInit() {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		input = defaultName
-	}
-
-	// Discover absolute tmux path for service environments where PATH is minimal.
-	tmuxPath, tmuxErr := exec.LookPath("tmux")
-	if tmuxErr != nil {
-		fmt.Printf("\n⚠ Could not find tmux in PATH: %v\n", tmuxErr)
-		fmt.Println("  Install tmux and re-run 'pmux init', or set tmux.tmux_path in config.toml.")
 	}
 
 	// Write config: start with name, then commented defaults with tmux path injected
