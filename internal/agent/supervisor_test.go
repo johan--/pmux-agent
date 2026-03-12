@@ -69,6 +69,52 @@ func TestSignalActivity_NonexistentPID(t *testing.T) {
 	signalActivity(999999999)
 }
 
+func TestSignalUnpair_DeliversSIGUSR2(t *testing.T) {
+	// Register to receive SIGUSR2 on the current process
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGUSR2)
+	defer signal.Stop(ch)
+
+	signalUnpair(os.Getpid())
+
+	select {
+	case sig := <-ch:
+		if sig != syscall.SIGUSR2 {
+			t.Errorf("received %v, want SIGUSR2", sig)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for SIGUSR2")
+	}
+}
+
+func TestWaitForPID_Found(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, pidFileName)
+
+	// Write the PID file after a short delay
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		if err := WritePIDFile(pidFile); err != nil {
+			// Can't call t.Fatal from a goroutine; the timeout will catch this
+			return
+		}
+	}()
+
+	if !waitForPID(pidFile, 500*time.Millisecond) {
+		t.Error("waitForPID should return true when PID file is written with a running process")
+	}
+}
+
+func TestWaitForPID_Timeout(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "nonexistent.pid")
+
+	// No PID file will ever appear — expect timeout
+	if waitForPID(pidFile, 200*time.Millisecond) {
+		t.Error("waitForPID should return false when PID file never appears")
+	}
+}
+
 func TestStopRunning_NoAgent(t *testing.T) {
 	dir := t.TempDir()
 	paths := config.Paths{ConfigDir: dir}
