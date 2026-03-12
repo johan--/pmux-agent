@@ -8,6 +8,10 @@ import (
 	"syscall"
 )
 
+// sysExec is the function used to replace the current process.
+// Overridden in tests to avoid actually exec'ing.
+var sysExec = syscall.Exec
+
 // ExecTmux replaces the current process with tmux targeting the given socket.
 // If tmuxBin is empty, tmux is resolved from PATH.
 // This function does not return on success (the process is replaced).
@@ -25,5 +29,5 @@ func ExecTmux(socket string, tmuxBin string, args ...string) error {
 	tmuxArgs = append(tmuxArgs, args...)
 
 	// Replace current process with tmux
-	return syscall.Exec(tmuxBin, tmuxArgs, os.Environ())
+	return sysExec(tmuxBin, tmuxArgs, os.Environ())
 }
