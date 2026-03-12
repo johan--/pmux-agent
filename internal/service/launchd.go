@@ -137,7 +137,7 @@ func (m *launchdManager) Install() error {
 
 	// bootstrap loads and starts the service
 	uid := os.Getuid()
-	cmd := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", uid), m.plistPath())
+	cmd := execCommand("launchctl", "bootstrap", fmt.Sprintf("gui/%d", uid), m.plistPath())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		outStr := strings.TrimSpace(string(out))
 		// If already bootstrapped, bootout first then re-bootstrap to pick up
@@ -151,7 +151,7 @@ func (m *launchdManager) Install() error {
 			if err := m.writePlist(); err != nil {
 				return fmt.Errorf("rewrite plist: %w", err)
 			}
-			cmd2 := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%d", uid), m.plistPath())
+			cmd2 := execCommand("launchctl", "bootstrap", fmt.Sprintf("gui/%d", uid), m.plistPath())
 			if out2, err2 := cmd2.CombinedOutput(); err2 != nil {
 				return wrapLaunchctlError("re-bootstrap", string(out2), err2)
 			}
@@ -165,7 +165,7 @@ func (m *launchdManager) Install() error {
 func (m *launchdManager) Uninstall() error {
 	uid := os.Getuid()
 	// bootout stops and unloads the service
-	exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%d/%s", uid, launchdLabel)).Run() //nolint:errcheck
+	execCommand("launchctl", "bootout", fmt.Sprintf("gui/%d/%s", uid, launchdLabel)).Run() //nolint:errcheck
 	// Remove plist file
 	if err := os.Remove(m.plistPath()); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove plist: %w", err)
@@ -183,7 +183,7 @@ func (m *launchdManager) Start() error {
 	target := fmt.Sprintf("%s/%s", domain, launchdLabel)
 
 	// Try kickstart first (works if service is loaded but not running).
-	cmd := exec.Command("launchctl", "kickstart", target)
+	cmd := execCommand("launchctl", "kickstart", target)
 	if _, err := cmd.CombinedOutput(); err == nil {
 		return nil
 	}
@@ -192,7 +192,7 @@ func (m *launchdManager) Start() error {
 	if err := m.writePlist(); err != nil {
 		return fmt.Errorf("write plist: %w", err)
 	}
-	cmd = exec.Command("launchctl", "bootstrap", domain, m.plistPath())
+	cmd = execCommand("launchctl", "bootstrap", domain, m.plistPath())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return wrapLaunchctlError("bootstrap", string(out), err)
 	}
@@ -210,7 +210,7 @@ func (m *launchdManager) Stop() error {
 	// stays stopped until Start()/Install() re-bootstraps it.
 	uid := os.Getuid()
 	target := fmt.Sprintf("gui/%d/%s", uid, launchdLabel)
-	cmd := exec.Command("launchctl", "bootout", target)
+	cmd := execCommand("launchctl", "bootout", target)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		outStr := strings.TrimSpace(string(out))
 		// Not loaded / not found is not an error when stopping.
@@ -225,7 +225,7 @@ func (m *launchdManager) Stop() error {
 
 func (m *launchdManager) Status() (Status, error) {
 	uid := os.Getuid()
-	cmd := exec.Command("launchctl", "print", fmt.Sprintf("gui/%d/%s", uid, launchdLabel))
+	cmd := execCommand("launchctl", "print", fmt.Sprintf("gui/%d/%s", uid, launchdLabel))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if !m.IsInstalled() {

@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -99,7 +98,7 @@ func (m *systemdManager) Stop() error {
 }
 
 func (m *systemdManager) Status() (Status, error) {
-	cmd := exec.Command("systemctl", "--user", "show", systemdUnitName,
+	cmd := execCommand("systemctl", "--user", "show", systemdUnitName,
 		"--property=ActiveState,MainPID")
 	out, err := cmd.Output()
 	if err != nil {
@@ -131,7 +130,7 @@ func (m *systemdManager) IsInstalled() bool {
 
 func (m *systemdManager) systemctl(args ...string) error {
 	fullArgs := append([]string{"--user"}, args...)
-	cmd := exec.Command("systemctl", fullArgs...)
+	cmd := execCommand("systemctl", fullArgs...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("systemctl %s: %s: %w", strings.Join(args, " "), strings.TrimSpace(string(out)), err)
 	}
