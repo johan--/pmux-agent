@@ -646,50 +646,15 @@ func handleAgentStatus() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("pmux %s\n", version)
-
-	pidFile := agent.PIDFilePath(paths)
-
-	pid, err := agent.ReadPIDFile(pidFile)
-	if err != nil {
-		fmt.Println("Agent is not running")
-		os.Exit(1)
-	}
-
-	if !agent.IsProcessRunning(pid) {
-		fmt.Println("Agent is not running (stale PID file)")
-		agent.CleanStalePIDFile(pidFile)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Agent is running (PID %d)\n", pid)
-
-	// Service installation status
 	exe, _ := os.Executable()
 	mgr := service.NewManager(exe, paths.ConfigDir)
-	if mgr.IsInstalled() {
-		fmt.Println("Service: installed")
-	} else {
-		fmt.Println("Service: not installed")
-	}
 
-	// Try to get process uptime via ps
-	out, err := exec.Command("ps", "-o", "etime=", "-p", fmt.Sprintf("%d", pid)).Output()
-	if err == nil {
-		uptime := strings.TrimSpace(string(out))
-		if uptime != "" {
-			fmt.Printf("Uptime: %s\n", uptime)
+	if err := agent.RunAgentDetail(version, paths, mgr, os.Stdout); err != nil {
+		if errors.Is(err, agent.ErrAgentNotRunning) {
+			os.Exit(1)
 		}
-	}
-
-	// Show last 5 lines of agent log
-	logFile := filepath.Join(paths.ConfigDir, "agent.log")
-	lines, err := tailFile(logFile, 5)
-	if err == nil && len(lines) > 0 {
-		fmt.Println("\nRecent log:")
-		for _, line := range lines {
-			fmt.Printf("  %s\n", line)
-		}
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -790,24 +755,6 @@ func handleAgentUninstall() {
 	fmt.Println("Service uninstalled.")
 }
 
-// tailFile reads the last n lines from a file.
-func tailFile(path string, n int) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var lines []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-		if len(lines) > n {
-			lines = lines[1:]
-		}
-	}
-	return lines, scanner.Err()
-}
 
 func printHelp() {
 	fmt.Println(`pmux — PocketMux terminal access agent
