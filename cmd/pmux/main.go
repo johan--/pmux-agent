@@ -233,66 +233,12 @@ func handleInit() {
 		os.Exit(1)
 	}
 
-	// Check if identity already exists
-	if auth.HasIdentity(paths.KeysDir, store) {
-		id, err := auth.LoadIdentity(paths.KeysDir, store, slog.Default())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "⚠ failed to load existing identity: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("Identity already exists.\n")
-		fmt.Printf("Device ID: %s\n", id.DeviceID)
-		if cfg.Name != "" {
-			fmt.Printf("Host name: %s\n", cfg.Name)
-		}
-		return
-	}
+	exe, _ := os.Executable()
+	mgr := service.NewManager(exe, paths.ConfigDir)
 
-	id, err := auth.GenerateIdentity(paths.KeysDir, store)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "⚠ failed to generate identity: %v\n", err)
+	if err := agent.RunInit(paths, cfg, store, mgr, tmuxPath, os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ %v\n", err)
 		os.Exit(1)
-	}
-
-	// Prompt for host name (default: OS hostname)
-	defaultName := config.DefaultHostName()
-	fmt.Printf("Host name [%s]: ", defaultName)
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
-	if input == "" {
-		input = defaultName
-	}
-
-	// Write config: start with name, then commented defaults with tmux path injected
-	tmuxSection := "# socket_name = \"pmux\""
-	if tmuxPath != "" {
-		tmuxSection += fmt.Sprintf("\ntmux_path = %q", tmuxPath)
-	}
-	template := strings.Replace(config.CommentedDefaultConfig(),
-		"# socket_name = \"pmux\"", tmuxSection, 1)
-	configContent := fmt.Sprintf("name = %q\n\n%s", input, template)
-	if err := os.WriteFile(paths.ConfigFile, []byte(configContent), 0600); err != nil {
-		fmt.Fprintf(os.Stderr, "⚠ failed to save config: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("\nIdentity generated.\n")
-	fmt.Printf("Device ID: %s\n", id.DeviceID)
-	fmt.Printf("Host name: %s\n", input)
-	fmt.Printf("Keys saved to: %s (backend: %s)\n", paths.KeysDir, store.Backend())
-
-	// Install agent as OS service
-	exe, exeErr := os.Executable()
-	if exeErr == nil {
-		mgr := service.NewManager(exe, paths.ConfigDir)
-		if err := mgr.Install(); err != nil {
-			fmt.Printf("\n⚠ Could not install service: %v\n", err)
-			fmt.Println("  The agent will still start automatically when you run pmux commands.")
-			fmt.Println("  Run 'pmux agent install' later to enable always-on mode.")
-		} else {
-			fmt.Println("\nService installed. Agent is running.")
-		}
 	}
 }
 
