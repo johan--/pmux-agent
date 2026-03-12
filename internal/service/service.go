@@ -2,10 +2,7 @@
 // systemd on Linux). The agent IS the service — these are not separate concepts.
 package service
 
-import (
-	"fmt"
-	"runtime"
-)
+import "fmt"
 
 // Status represents the current state of the agent service.
 type Status struct {
@@ -28,20 +25,6 @@ type Manager interface {
 	Status() (Status, error)
 	// IsInstalled returns whether the service file exists and is registered.
 	IsInstalled() bool
-}
-
-// NewManager returns the appropriate Manager for the current platform.
-// pmuxPath is the absolute path to the pmux binary (resolved at install time).
-// configDir is the path to ~/.config/pmux (for log file paths in service config).
-func NewManager(pmuxPath string, configDir string) Manager {
-	switch runtime.GOOS {
-	case "darwin":
-		return newLaunchdManager(pmuxPath, configDir)
-	case "linux":
-		return newSystemdManager(pmuxPath, configDir)
-	default:
-		return &unsupportedManager{platform: runtime.GOOS}
-	}
 }
 
 // unsupportedManager is returned on platforms without service manager support.
