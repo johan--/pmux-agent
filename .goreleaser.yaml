@@ -114,7 +114,7 @@ snapcrafts:
     title: pmux
     publish: true
     grade: stable
-    confinement: devmode
+    confinement: classic
     license: MIT
     base: core24
     channel_templates:
