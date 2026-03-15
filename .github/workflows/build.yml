@@ -5,6 +5,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -12,10 +15,10 @@ jobs:
       matrix:
         go-version: ['1.25']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ matrix.go-version }}
-      - run: go install mvdan.cc/garble@latest
+      - run: go install mvdan.cc/garble@v0.15.0
       - run: go vet ./...
       - run: go build -ldflags="-X main.version=dev" -o bin/pmux ./cmd/pmux

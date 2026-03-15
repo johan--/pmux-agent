@@ -11,19 +11,19 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.25"
 
       - name: Install garble
-        run: go install mvdan.cc/garble@latest
+        run: go install mvdan.cc/garble@v0.15.0
 
       - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -31,14 +31,14 @@ jobs:
       - name: Install Snapcraft
         run: sudo snap install snapcraft --classic
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GPG_FINGERPRINT: 43DD81D2D7882A003B1F149D522A973B0BA53262
+          GPG_FINGERPRINT: ${{ vars.GPG_FINGERPRINT }}
           PMUX_HMAC_SECRET: ${{ secrets.PMUX_HMAC_SECRET }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
