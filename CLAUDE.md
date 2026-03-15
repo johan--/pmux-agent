@@ -76,3 +76,4 @@ Config file: `~/.config/pmux/config.toml`
 - macOS code signing/notarization (env-gated)
 - Homebrew cask publishing to `ShiftinBits/homebrew-tap` (env-gated)
 - DEB and RPM packages via nFPM (tmux as dependency)
+- Snap package publishing to the Snap Store (classic confinement, core24 base, `SNAPCRAFT_STORE_CREDENTIALS` env-gated)
