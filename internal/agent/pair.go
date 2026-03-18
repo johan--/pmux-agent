@@ -107,7 +107,7 @@ func RunPair(paths config.Paths, cfg config.Config, store auth.SecretStore, mgr 
 		return fmt.Errorf("failed to generate QR code: %w", err)
 	}
 
-	fmt.Fprintln(w, "\nScan this QR code with PocketMux on your mobile device:")
+	fmt.Fprintln(w, "\nScan this QR code with Pocketmux on your mobile device:")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, qr.ToSmallString(false))
 	fmt.Fprintf(w, "Manual pairing code: %s\n\n", pairResp.PairingCode)

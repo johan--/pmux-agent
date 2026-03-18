@@ -13,7 +13,7 @@ import (
 	"github.com/shiftinbits/pmux-agent/internal/service"
 )
 
-// RunInit generates a new PocketMux identity and writes the initial config file.
+// RunInit generates a new Pocketmux identity and writes the initial config file.
 // If an identity already exists, it displays the existing device ID and returns.
 // The service manager install is best-effort — failures are reported but non-fatal.
 func RunInit(paths config.Paths, cfg config.Config, store auth.SecretStore, mgr service.Manager, tmuxPath string, r io.Reader, w io.Writer) error {

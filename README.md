@@ -1,8 +1,8 @@
-# pmux — PocketMux Agent
+# pmux — Pocketmux Agent
 
 [![Current Release](https://img.shields.io/github/v/release/shiftinbits/pmux-agent)](https://github.com/ShiftinBits/pmux-agent/releases) [![pmux](https://snapcraft.io/pmux/badge.svg)](https://snapcraft.io/pmux) [![Test Results](https://img.shields.io/github/actions/workflow/status/shiftinbits/pmux-agent/test.yml?branch=main&logo=go&logoColor=white&label=tests)](https://github.com/shiftinbits/pmux-agent/actions/workflows/test.yml?query=branch%3Amain) [![Code Coverage](https://img.shields.io/codecov/c/github/shiftinbits/pmux-agent?logo=codecov&logoColor=white)](https://app.codecov.io/gh/shiftinbits/pmux-agent/) [![CodeQL Results](https://github.com/ShiftinBits/pmux-agent/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/ShiftinBits/pmux-agent/actions/workflows/github-code-scanning/codeql) [![Snyk Security Monitored](https://img.shields.io/badge/security-monitored-8A2BE2?logo=snyk)](https://snyk.io/test/github/shiftinbits/pmux-agent) [![License](https://img.shields.io/badge/license-MIT-3DA639?logo=opensourceinitiative&logoColor=white)](LICENSE)
 
-`pmux` is a transparent drop-in replacement for `tmux` that makes your terminal sessions accessible from your phone. Replace `tmux` with `pmux` in your workflow — every command works identically, but sessions are automatically accessible from the [PocketMux](https://pmux.io) mobile app over an encrypted peer-to-peer connection.
+`pmux` is a transparent drop-in replacement for `tmux` that makes your terminal sessions accessible from your phone. Replace `tmux` with `pmux` in your workflow — every command works identically, but sessions are automatically accessible from the [Pocketmux](https://pmux.io) mobile app over an encrypted peer-to-peer connection.
 
 ```bash
 pmux new-session -s work      # just like tmux, but now accessible from your phone
@@ -33,7 +33,7 @@ Pre-built binaries and DEB/RPM/Snap packages are available on [GitHub Releases](
 
 ```bash
 pmux init     # generate identity, install service
-pmux pair     # scan the QR code with the PocketMux app
+pmux pair     # scan the QR code with the Pocketmux app
 pmux          # start a session — it's now on your phone
 ```
 

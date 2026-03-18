@@ -1,4 +1,4 @@
-// Package agent implements the core PocketMux agent lifecycle: start, connect, shutdown.
+// Package agent implements the core Pocketmux agent lifecycle: start, connect, shutdown.
 package agent
 
 import (
@@ -41,7 +41,7 @@ type serverChecker interface {
 	IsServerRunning() bool
 }
 
-// Run starts the PocketMux agent. It connects to the signaling server,
+// Run starts the Pocketmux agent. It connects to the signaling server,
 // handles WebRTC connections, and monitors the tmux server.
 // Blocks until the context is canceled (SIGTERM/SIGINT or fatal error).
 func Run(ctx context.Context, paths config.Paths, hmacSecret, version, installMethod string) error {

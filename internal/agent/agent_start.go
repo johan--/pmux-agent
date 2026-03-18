@@ -9,7 +9,7 @@ import (
 	"github.com/shiftinbits/pmux-agent/internal/service"
 )
 
-// RunAgentStart starts the PocketMux agent. It checks whether the agent is
+// RunAgentStart starts the Pocketmux agent. It checks whether the agent is
 // already running, tries the OS service manager if installed, and falls back
 // to a direct spawn via EnsureRunning.
 func RunAgentStart(paths config.Paths, store auth.SecretStore, mgr service.Manager, w io.Writer) error {

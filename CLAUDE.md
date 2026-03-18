@@ -1,6 +1,6 @@
 # CLAUDE.md — pmux-agent
 
-Go agent binary for PocketMux. `pmux` is a transparent tmux wrapper that proxies all commands to `tmux -L pmux` while running a background WebRTC agent for mobile access.
+Go agent binary for Pocketmux. `pmux` is a transparent tmux wrapper that proxies all commands to `tmux -L pmux` while running a background WebRTC agent for mobile access.
 
 ## Quick Reference
 

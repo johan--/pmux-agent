@@ -125,7 +125,7 @@ snapcrafts:
       from your mobile device. End-to-end encrypted, peer-to-peer connected.
 
       pmux is a transparent tmux wrapper — use it exactly like tmux. Your
-      sessions are accessible from the PocketMux mobile app via WebRTC.
+      sessions are accessible from the Pocketmux mobile app via WebRTC.
 
       Requires tmux to be installed on the system.
     apps:

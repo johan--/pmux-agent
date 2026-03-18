@@ -98,7 +98,7 @@ func TestRunUninstall_FullUninstall(t *testing.T) {
 	if !strings.Contains(output, "Config directory removed") {
 		t.Errorf("expected config removal message, got: %s", output)
 	}
-	if !strings.Contains(output, "PocketMux uninstalled successfully.") {
+	if !strings.Contains(output, "Pocketmux uninstalled successfully.") {
 		t.Errorf("expected success message, got: %s", output)
 	}
 
@@ -172,7 +172,7 @@ func TestRunUninstall_NoIdentity(t *testing.T) {
 	if !strings.Contains(output, "No identity found, skipping server un-registration.") {
 		t.Errorf("expected no-identity message, got: %s", output)
 	}
-	if !strings.Contains(output, "PocketMux uninstalled successfully.") {
+	if !strings.Contains(output, "Pocketmux uninstalled successfully.") {
 		t.Errorf("expected success message, got: %s", output)
 	}
 }
@@ -194,10 +194,10 @@ func TestRunUninstall_YesFlag_SkipsPrompt(t *testing.T) {
 	if strings.Contains(output, "Proceed with uninstall? [y/N]") {
 		t.Error("should not prompt when --yes is set")
 	}
-	if !strings.Contains(output, "Uninstalling PocketMux") {
-		t.Errorf("expected 'Uninstalling PocketMux' header, got: %s", output)
+	if !strings.Contains(output, "Uninstalling Pocketmux") {
+		t.Errorf("expected 'Uninstalling Pocketmux' header, got: %s", output)
 	}
-	if !strings.Contains(output, "PocketMux uninstalled successfully.") {
+	if !strings.Contains(output, "Pocketmux uninstalled successfully.") {
 		t.Errorf("expected success message, got: %s", output)
 	}
 }

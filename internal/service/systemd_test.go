@@ -261,7 +261,7 @@ func TestSystemdManager_Install_WritesUnit(t *testing.T) {
 		t.Fatalf("read unit: %v", err)
 	}
 
-	if !strings.Contains(string(data), "PocketMux Agent") {
+	if !strings.Contains(string(data), "Pocketmux Agent") {
 		t.Error("written unit missing description")
 	}
 

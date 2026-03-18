@@ -40,7 +40,7 @@ const (
 	EnvUpdateInterval  = "PMUX_UPDATE_INTERVAL"
 )
 
-// Config holds user-editable PocketMux configuration from config.toml.
+// Config holds user-editable Pocketmux configuration from config.toml.
 type Config struct {
 	Name       string           `toml:"name,omitempty"`
 	LogLevel   string           `toml:"log_level,omitempty"`
@@ -517,7 +517,7 @@ func FormatEffective(cfg Config, sources ConfigSources) string {
 // by `pmux init`. Values are commented out so they act as documentation without
 // overriding defaults.
 func CommentedDefaultConfig() string {
-	return `# PocketMux Agent Configuration
+	return `# Pocketmux Agent Configuration
 
 # Log level: "debug", "info", "warn", or "error" (env: PMUX_LOG_LEVEL)
 # log_level = "info"
@@ -555,7 +555,7 @@ func CommentedDefaultConfig() string {
 `
 }
 
-// Paths holds resolved filesystem paths for PocketMux configuration and keys.
+// Paths holds resolved filesystem paths for Pocketmux configuration and keys.
 type Paths struct {
 	ConfigDir     string // ~/.config/pmux
 	KeysDir       string // ~/.config/pmux/keys
@@ -563,7 +563,7 @@ type Paths struct {
 	ConfigFile    string // ~/.config/pmux/config.toml
 }
 
-// DefaultPaths returns the standard PocketMux directory paths based on $HOME.
+// DefaultPaths returns the standard Pocketmux directory paths based on $HOME.
 func DefaultPaths() (Paths, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

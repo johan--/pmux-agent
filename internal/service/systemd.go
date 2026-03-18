@@ -35,7 +35,7 @@ func (m *systemdManager) unitPath() string {
 func (m *systemdManager) generateUnit() string {
 	logPath := filepath.Join(m.configDir, "agent.log")
 	return fmt.Sprintf(`[Unit]
-Description=PocketMux Agent
+Description=Pocketmux Agent
 After=network-online.target
 Wants=network-online.target
 

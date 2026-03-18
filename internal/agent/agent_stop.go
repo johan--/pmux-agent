@@ -16,7 +16,7 @@ import (
 // requested a stop. main.go maps this to exit code 1.
 var ErrAgentNotRunning = errors.New("agent is not running")
 
-// RunAgentStop stops the PocketMux agent. It tries the OS service manager
+// RunAgentStop stops the Pocketmux agent. It tries the OS service manager
 // first (if installed), then falls back to direct PID-based stop via SIGTERM
 // with a SIGKILL fallback after 5 seconds.
 //

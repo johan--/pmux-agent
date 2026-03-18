@@ -62,15 +62,15 @@ func main() {
 		return
 	}
 
-	// Show update banner for PocketMux commands (not tmux passthrough).
-	if isPocketMuxCommand(args[0]) {
+	// Show update banner for Pocketmux commands (not tmux passthrough).
+	if isPocketmuxCommand(args[0]) {
 		paths, _ := config.DefaultPaths()
 		if paths.ConfigDir != "" {
 			update.PrintBannerIfAvailable(update.StateFilePath(paths.ConfigDir))
 		}
 	}
 
-	// Intercept PocketMux-only commands
+	// Intercept Pocketmux-only commands
 	switch args[0] {
 	case "init":
 		handleInit()
@@ -533,9 +533,9 @@ func handleAgentUninstall() {
 }
 
 
-// isPocketMuxCommand returns true for intercepted PocketMux commands
+// isPocketmuxCommand returns true for intercepted Pocketmux commands
 // (not tmux passthrough). Used to show the update banner.
-func isPocketMuxCommand(cmd string) bool {
+func isPocketmuxCommand(cmd string) bool {
 	switch cmd {
 	case "init", "pair", "config", "status", "unpair", "uninstall", "update", "agent", "--version", "-v", "--help", "-h":
 		return true
@@ -603,16 +603,16 @@ func handleUpdate() {
 }
 
 func printHelp() {
-	fmt.Println(`pmux — PocketMux terminal access agent
+	fmt.Println(`pmux — Pocketmux terminal access agent
 
-PocketMux commands:
+Pocketmux commands:
   init              Generate identity and configure agent
   pair              Pair with a mobile device (displays QR code)
   config            Show effective configuration with sources
   status            Show agent, service, and pairing status
   unpair            Remove the paired mobile device
   update            Check for and apply updates
-  uninstall [-y]    Remove PocketMux completely (reverses 'init')
+  uninstall [-y]    Remove Pocketmux completely (reverses 'init')
   agent run         Run the agent in the foreground
   agent start       Start the agent
   agent stop        Stop the agent

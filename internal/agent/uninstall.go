@@ -14,13 +14,13 @@ import (
 	"github.com/shiftinbits/pmux-agent/internal/service"
 )
 
-// RunUninstall removes PocketMux completely — the reverse of init.
+// RunUninstall removes Pocketmux completely — the reverse of init.
 // It stops the agent, uninstalls the OS service, un-registers from the
 // signaling server, and removes local config/keys.
 // If keepConfig is true, local config and keys are preserved.
 func RunUninstall(paths config.Paths, store auth.SecretStore, mgr service.Manager, keepConfig bool, hmacSecret string, skipConfirm bool, r io.Reader, w io.Writer) error {
 	if skipConfirm {
-		fmt.Fprintln(w, "Uninstalling PocketMux from this host:")
+		fmt.Fprintln(w, "Uninstalling Pocketmux from this host:")
 		fmt.Fprintln(w, "  • Stop the agent process")
 		fmt.Fprintln(w, "  • Uninstall the agent service (launchd/systemd)")
 		fmt.Fprintln(w, "  • Un-register this host from the signaling server")
@@ -30,7 +30,7 @@ func RunUninstall(paths config.Paths, store auth.SecretStore, mgr service.Manage
 		fmt.Fprintln(w)
 	} else {
 		// Step 1: Interactive confirmation
-		fmt.Fprintln(w, "This will remove PocketMux from this host:")
+		fmt.Fprintln(w, "This will remove Pocketmux from this host:")
 		fmt.Fprintln(w, "  • Stop the agent process")
 		fmt.Fprintln(w, "  • Uninstall the agent service (launchd/systemd)")
 		fmt.Fprintln(w, "  • Un-register this host from the signaling server")
@@ -104,6 +104,6 @@ func RunUninstall(paths config.Paths, store auth.SecretStore, mgr service.Manage
 		fmt.Fprintln(w, "Config and keys preserved (--keep-config).")
 	}
 
-	fmt.Fprintln(w, "\nPocketMux uninstalled successfully.")
+	fmt.Fprintln(w, "\nPocketmux uninstalled successfully.")
 	return nil
 }
