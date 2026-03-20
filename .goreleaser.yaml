@@ -181,8 +181,7 @@ notarize:
         issuer_id: "{{.Env.MACOS_NOTARY_ISSUER_ID}}"
         key_id: "{{.Env.MACOS_NOTARY_KEY_ID}}"
         key: "{{.Env.MACOS_NOTARY_KEY}}"
-        wait: true
-        timeout: 20m
+        wait: false
 
 # Publish Homebrew cask to tap repo (env-gated, skipped if token not set)
 homebrew_casks:
